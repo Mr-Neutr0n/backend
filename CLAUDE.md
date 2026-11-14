@@ -14,7 +14,7 @@ Planned services, from the project roadmap:
 
 ## Current status
 
-The Django project scaffold exists (`config`, with settings read from the environment, plus `apps/accounts` with the custom email-login user model and the first migration, `apps/audit` with the append-only audit log (`AuditEvent`, `record_event`), `config/api.py` with the django-ninja API mounted at `/api/v1/` with the health checks in `config/health.py` as its only operations so far, the Celery app in `config/celery.py`, configured in the Celery section of `config/settings.py` (four queues, django-celery-beat), static files through WhiteNoise, CORS for `/api/` through django-cors-headers, `gunicorn.conf.py` for serving, and `compose.yaml` for local services), and no OPEN rating is live. The work is planned as GitHub issues grouped into outcome milestones (v0.1 MVP through v0.4), epics with sub-issues, native blocked-by links, and the "OPEN backend" org project board. Issue #1 records the plan's decisions and open questions; other issues cite them as "decisions Qn" or "Fn". Read the relevant ones before starting an issue.
+The Django project scaffold exists (`config`, with settings read from the environment, plus `apps/accounts` with the custom email-login user model and the first migration, `apps/audit` with the append-only audit log (`AuditEvent`, `record_event`), `apps/public_ids` with OPEN Codes (`PublicCodeModel`, the `IssuedCode` registry, the `PublicCodePath` path parameter), `config/api.py` with the django-ninja API mounted at `/api/v1/` with the health checks in `config/health.py` as its only operations so far, the Celery app in `config/celery.py`, configured in the Celery section of `config/settings.py` (four queues, django-celery-beat), static files through WhiteNoise, CORS for `/api/` through django-cors-headers, `gunicorn.conf.py` for serving, and `compose.yaml` for local services), and no OPEN rating is live. The work is planned as GitHub issues grouped into outcome milestones (v0.1 MVP through v0.4), epics with sub-issues, native blocked-by links, and the "OPEN backend" org project board. Issue #1 records the plan's decisions and open questions; other issues cite them as "decisions Qn" or "Fn". Read the relevant ones before starting an issue.
 
 ## Stack (decided, see issue #1)
 
@@ -49,12 +49,20 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - `flush` (and so the teardown of a transactional test) fails once the audit table has a row. Tests that record events should run in a transaction that rolls back (the default `django_db` mark).
 - `actor_user` and `target_content_type` use `PROTECT`: an Account that has acted cannot be hard-deleted (deactivate it instead), and a content type an event points at cannot be removed. Plan account deletion around this.
 
+## Public identifiers
+
+- A model whose records have a public identity (Player, Club, Event, Organizer, Match) inherits `apps.public_ids.models.PublicCodeModel` and sets `public_code_type`. The system check `public_ids.E001` reports a concrete subclass without one. ADR 0008 records the scheme.
+- Codes are created only by `save()` (or `objects.create()`), which issues the code, records it in `IssuedCode`, and refuses to change it later. Fixtures (`loaddata`), `bulk_create`, `QuerySet.update`, and raw SQL skip all of this and must not set codes. To copy a record, set `public_code = None`, `pk = None`, and `_state.adding = True` before saving. Saving a deleted record raises.
+- Never expose or accept a row id in the API. A path parameter that names a record is `Annotated[str, PublicCodePath(CodeType.X)]`, and the view looks the record up with `get_by_public_code()`. `PublicCodePath` is for path parameters only, not body or response fields. A test fails on any numeric `id`, `pk`, `*_id`, `*Id`, or plural of these in the OpenAPI document, hidden operations included.
+- To read a code from other input (such as a CSV column), use `apps.public_ids.codes.normalize()`, then look up the canonical form.
+
 ## API
 
 - There is one `NinjaAPI`, `api` in `config/api.py`, mounted at `/api/v1/`. Each app adds its operations to a `Router` in `apps/<app>/api.py`, and `config/api.py` mounts that router. The `config/api.py` docstring shows how. The health checks are the exception: their router is in `config/health.py`.
 - Every operation passes an explicit `operation_id`. It names the method in the generated client, so never change one for a rename. Building the OpenAPI document raises an error for an operation in the document that has none, and a test checks every operation.
 - Validation errors, an unparsable body, `Http404`, and `HttpError` come back as `ErrorResponse` (`config/api_errors.py`), and validation errors return 422. With DEBUG off, any other exception goes to Django, which returns its own HTML error page (a 500, or another status for exceptions Django maps, such as 403 for `PermissionDenied`). Raise `HttpError` or `Http404` instead of returning an error body by hand (the readiness check's 503 is not an error: it is a status report with its own documented schema), and use `HttpError(403, ...)`, never Django's `PermissionDenied`. Never declare a different 422 schema on an operation that takes input: building the document raises an error if you do. ADR 0005 records the versioning and error format.
 - Never put the submitted value in a validation message. The 422 response returns the message to the client.
+- A code path parameter (`PublicCodePath`) that fails returns 404, not 422, which narrows the 422 rule for that parameter (ADR 0008). With the other inputs valid, a malformed code and an unknown one get the same 404. With another input invalid, a well-formed code gets that input's 422 whether or not a record has it, so no response reveals that a record exists.
 
 ## Settings
 
