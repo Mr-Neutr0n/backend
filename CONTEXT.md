@@ -5,7 +5,7 @@ The shared vocabulary for this repository. Use these terms in models, endpoints,
 ## People and accounts
 
 **Player**:
-A person who plays matches and has ratings. Every Player belongs to exactly one Account, which creates it. There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
+A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
 _Avoid_: user, member, athlete.
 
 **Account**:
@@ -13,7 +13,7 @@ A registered OPEN login. An Account creates its own Player, and has at most one.
 _Avoid_: profile (a profile is the public view of a Player).
 
 **Opt-out**:
-A pause a Player turns on and off. While opted out, every lookup (profile, rating lookups, partner reads) answers for the Player exactly as for an unknown OPEN Code. The Player is left out of rankings, stats, webhooks, and the rating card, and shows as "Private player" in other players' match history. Past Matches stay in the Ledger and keep counting for the other players. The Player's own Rating is still computed in Replays but never published to others. New Submissions that name the Player fail, and so does any Submission not yet in the Ledger. The Player cannot confirm or dispute Matches. The Player can still see and export their own data, Rating included. Not a deletion (ADR 0002). Backend: `opted_out_at`.
+A pause a Player turns on and off. While opted out, every lookup (profile, rating lookups, rating history, partner reads) answers for the Player exactly as for an unknown OPEN Code. No stats or rankings about the Player are published, the rating card shows no Rating, and webhooks leave the Player out. Other players' match history, Match detail, and stats show the Player as "Private player". Past Matches stay in the Ledger and keep counting for the other players. The Player's own Rating is still computed in Replays but never published to others. New Submissions that name the Player fail, and so does any Submission that names them and is not yet in the Ledger. The Player cannot confirm a pending Submission but can still dispute a Match already in the Ledger. Corrections and reviews of Ledger Matches go on. The Player can still see and export their own data, Rating included. Not a deletion (ADR 0002). Backend: `opted_out_at`.
 _Avoid_: deletion, deactivation.
 
 **Organizer**:
