@@ -9,7 +9,7 @@ OPEN never charges players, so it stores no payment data (issue #93). It still n
 
 These choices are hard to change once players exist. So they are fixed before the first Player migration (#19).
 
-ADR 0002 already decided two things. There are no unclaimed Player records: every Player is created by its own Account. And there is no opt-out: the display name and current Ratings of an active Account's Player are visible to every signed-in Account.
+ADR 0002 already decided two things. There are no unclaimed Player records: every Player is created by its own Account. And there is no opt-out: once Ratings are published, the display name and current Ratings of an active Account's Player are visible to every signed-in Account.
 
 ## Decision
 
@@ -38,7 +38,7 @@ Only the player sets these, on their own Player. No Organizer, Partner, CSV uplo
 ### Players must be 13 or older
 
 - Every path that creates a Player applies the 13-and-older rule by the end-of-month rule. It refuses anyone under 13 and keeps nothing from the attempt (#114).
-- Signup asks for birth year and month first, on a neutral screen that does not hint at the limit. The age the signup screen collects is the one stored on the Player. #114 decides how it carries over.
+- Signup asks for birth year and month first, on a neutral screen that does not hint at the limit. The age the signup screen collects is the one stored on the Player. Until the Player exists, the signup age may be held only in the signup session, on the server. It is deleted when the Player is created or the session ends. #114 decides the mechanics.
 - Under-13 players are out of scope. US COPPA would require verifiable parental consent, separate consent for partner sharing, parent review and deletion rights, and legal review. The email-only consent method does not apply, since OPEN shows ratings to every signed-in Account and shares them with Partners.
 - Parent-managed child profiles may come in a later milestone, with legal counsel, through a new ADR.
 - Organizer CSV uploads carry the Organizer's confirmation that every player is 13 or older (#71).
@@ -55,7 +55,7 @@ Only the player sets these, on their own Player. No Organizer, Partner, CSV uplo
 ### Unknown age
 
 - A live Player always has a birth year and month. A Player cannot be created without them.
-- An Account with no Player (for example a staff Account made with `createsuperuser`) holds no age and no Player data.
+- An Account with no Player (for example a staff Account made with `createsuperuser`) stores no age on the Account row and holds no Player data.
 - ADR 0002 removed unclaimed players, so unknown ages from organizer uploads never arise.
 - A Player loses its birth year and month only by removal: when its Account is deleted (#116), or when a moderator removes an under-13 player's personal data (#114). Such a Player is excluded from all partner sharing, permanently.
 - When #114 or #116 removes a required field (display name, birth year and month), that issue decides how the Player is shown.
@@ -65,9 +65,9 @@ Only the player sets these, on their own Player. No Organizer, Partner, CSV uplo
 - **Email address.** The login (ADR 0003). Seen by the player, and by staff whose role needs it. Never returned by any API except to the Account itself. Not encrypted, because login lookups and the case-insensitive unique constraint compare it (ADR 0003). Protected by access control, and by the rule that it never appears in logs or error reports (#65, #66).
 - **Password.** Only Django's salted hash is stored.
 
-### Sensitive personal data fields
+### Identifying personal data fields
 
-The sensitive personal data fields are the email address, legal name, birth year and month, gender division, and city and region. Rules in this record that name this set apply only to it. All personal data, sensitive or not, is listed in the inventory. Audit Events may record the values of other personal data, such as Ratings, Matches, permissions, and privacy settings (ADR 0007).
+The identifying personal data fields are the email address, display name, legal name, birth year and month, gender division, and city and region. Rules in this record that name this set apply only to it. All personal data, identifying or not, is listed in the inventory. Audit Events may record the values of other personal data: Ratings and Matches (ADR 0007), permissions, and privacy settings (#19's privacy change audit task). The display name is in the set because a name kept in old Audit Events would undo Account deletion.
 
 ### What OPEN does not collect
 
@@ -83,7 +83,7 @@ The sensitive personal data fields are the email address, legal name, birth year
 - Celery task arguments and return values (`CLAUDE.md`, Settings).
 - API error messages (`CLAUDE.md`, API).
 - Fixtures, seed data, and factories, beyond made-up Faker data (hard rule 1).
-- Audit Event `before`, `after`, and `reason` values, for the sensitive personal data fields. An Audit Event about a sensitive personal data field records the field's name, never its old or new value.
+- Audit Event `before`, `after`, and `reason` values, for the identifying personal data fields. An Audit Event about an identifying personal data field records the field's name, never its old or new value.
 - Partner APIs, webhooks, and OpenAPI examples never include legal name, birth year, or birth month (#115). The seed command (#41) sets only made-up values for them.
 
 ### Retention
@@ -91,20 +91,24 @@ The sensitive personal data fields are the email address, legal name, birth year
 Personal data stays while the Account exists. There is no automatic deletion of active or inactive Accounts.
 
 - A refused under-13 attempt to create a Player keeps nothing.
-- Deleting an Account removes its personal data from the live database at once (#116). The Player and its Matches stay in the Ledger with the personal data removed (ADR 0002, hard rule 3).
+- Deleting an Account removes its identifying personal data from the live database at once, and ends and deletes its sessions (#116). What stays, and why:
+  - The Player, with its OPEN Code, Matches, and Ratings (the Ledger, ADR 0002, hard rule 3).
+  - Audit Events, which never hold an identifying field's value (ADR 0007).
+  - For an Account that has acted, its row with the identifying fields cleared (`PROTECT`, ADR 0007).
+  - None of these keeps a name, email, or age.
 - A player found to be under 13: a moderator removes their personal data the same way (#114).
 - Backups age deleted personal data out within 30 days (#67).
-- Logs and error reports hold no personal data (#65, #66) and are kept 30 days.
-- Audit Events are kept indefinitely (they are append-only, ADR 0007). They never hold the value of a sensitive personal data field.
+- Logs (#66) and error reports (#65) hold no personal data and are kept 30 days.
+- Audit Events are kept indefinitely (they are append-only, ADR 0007). They never hold the value of an identifying personal data field.
 - Expired sessions are removed by a scheduled task (#116). Deleting an Account also deletes its sessions (#116).
 - A data export file (#39) is deleted when its download link expires.
 
 ## Consequences
 
-- #19 adds the Player fields above, its privacy settings, and its OPEN Code, and no other personal data field. It drops nothing beyond what ADR 0002 dropped. `Player.__str__` must return the display name or OPEN Code, never the legal name, because Django's admin log stores it in `object_repr`. Its privacy settings need a most-restrictive level for players aged 13 to 17.
+- #19 adds the Player fields above, its privacy settings, and its OPEN Code, and no other personal data field. It drops nothing beyond what ADR 0002 dropped. `Player.__str__` must return the Player's OPEN Code, never the display name or legal name, so Django's admin log `object_repr` never holds a name. Its privacy settings need a most-restrictive level for players aged 13 to 17.
 - #114 builds the age screen, the 13-and-older refusal, the end-of-month rule, and the removal of an under-13 player's personal data. Its task "Players aged 13 to 17 start with profile visibility set to private" means the other profile details only (ADR 0002).
-- #115 encrypts legal name, birth year and month, and gender division ("gender" in #115 means the gender division). It audits staff access, and adds the check that every personal data field is in the inventory.
-- #116 deletes personal data on Account deletion and runs the session cleanup. It has no unclaimed records to age out (ADR 0002) and no inactivity deletion to run. `AuditEvent.actor_user` uses `PROTECT` (ADR 0007), so a deleted Account's row is kept with its personal data cleared, not hard-deleted. #116 decides the mechanics.
+- #115 encrypts legal name, birth year and month, and gender division ("gender" in #115 means the gender division). It audits staff access, and adds the check that every personal data field is in the inventory. Its task "the seed command (#41) never includes these fields" now means the seed command sets only made-up values for them, since a Player needs a birth year and month.
+- #116 deletes identifying personal data on Account deletion and runs the session cleanup. Its criterion "no personal data about the player remains" means identifying personal data, per this record. It has no unclaimed records to age out (ADR 0002) and no inactivity deletion to run. `AuditEvent.actor_user` uses `PROTECT` (ADR 0007), so an Account that has acted is kept as a deactivated row with its identifying fields cleared. Any other Account row may be deleted. #116 decides the mechanics.
 - #67 sets backup retention so deleted personal data is gone from backups within 30 days.
 - #39's export includes every field in the inventory that belongs to the player.
 - Every planned personal data field goes in the inventory when it lands.
