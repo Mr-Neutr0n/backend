@@ -82,7 +82,7 @@ class User(AbstractUser):
 
     `User` holds login data only. Player profile data (name, ratings,
     matches, external IDs) does not live here; it lives on Player. Each
-    Account creates its own Player (ADR 0002).
+    Account creates at most one Player, its own (ADR 0002).
     """
 
     # Removing the inherited fields: the stubs type them as str.

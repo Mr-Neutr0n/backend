@@ -53,11 +53,12 @@ No unclaimed players exist, so there is no minimum data set for one. Personal da
 
 - A league needs every player to sign up and create a Player before its results are uploaded. #124 already says this.
 - #124's out-of-scope items "Claiming an existing unclaimed record" and "Organizer-created players from a roster" are settled. Neither is planned.
-- #19 drops its "claimed status" task, its criterion "A player can exist without a user (unclaimed)", its "private" profile visibility option, `opted_out_at`, its criterion "Opting out is recorded with a timestamp and an audit event", and the opt-out part of its audit task.
+- #19 drops its "claimed status" task, its criterion "A player can exist without a user (unclaimed)", `opted_out_at`, its criterion "Opting out is recorded with a timestamp and an audit event", and the opt-out part of its audit task.
+- #19's "private" visibility option no longer applies to a player's name and Ratings. It stays for the other profile details.
 - With no anonymous access, #19's "public" visibility level and its "whether rating history is public" setting, and #93's "can choose to make them public", become the signed-in level.
 - #93's "Unclaimed players" rule becomes: only the player sets birth year, birth month, gender, and legal name, on their own Player.
 - #93's question about unknown ages for unclaimed players does not arise.
-- #93's "private by default" rule for players aged 13 to 17 applies only to the other profile details. Their name and Rating stay visible behind authentication.
+- #93's "private by default" rule for players aged 13 to 17 applies only to the other profile details. Their name and current Ratings stay visible to signed-in Accounts.
 - The "Private player" label in #31 and #56 no longer applies to a player's name. Those issues need rewording.
 - Mentions of opted-out players in #19, #53, #83, #85, #96, and #124 no longer apply. #124's "Private and opted-out profiles return 404 to the public" no longer applies: there are no private or opted-out profiles.
 - #116's retention for unclaimed records has nothing to act on.
