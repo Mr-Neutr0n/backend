@@ -125,9 +125,12 @@ def _issue_code(model: type["PublicCodeModel"], using: str) -> str:
     registry row).
     """
     code_type = model.public_code_type
+    # The model that owns the column: a multi-table child's own manager
+    # would not see rows of its parent that are not children.
+    owner = model._meta.get_field("public_code").model
     for _ in range(MAX_ATTEMPTS):
         code = _generate(code_type)
-        if model._base_manager.using(using).filter(public_code=code).exists():
+        if owner._base_manager.using(using).filter(public_code=code).exists():
             continue
         try:
             # A savepoint, so a collision leaves the caller's transaction usable.
@@ -182,11 +185,10 @@ class PublicCodeModel(models.Model):
             return
         if self.public_code is not None:
             raise ValueError("A public code is only ever generated, never set.")
-        # Always insert: a new instance carrying an existing pk must not
-        # overwrite that row's code.
-        kwargs["force_insert"] = kwargs.get("force_insert") or True
+        kwargs["force_insert"] = self._insert_everywhere(kwargs.get("force_insert"))
         using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
-        original_pk = self.pk
+        keys = self._key_attnames()
+        original_keys = {name: getattr(self, name) for name in keys}
         try:
             with transaction.atomic(using=using):
                 self.public_code = _issue_code(type(self), using)
@@ -194,13 +196,41 @@ class PublicCodeModel(models.Model):
         except BaseException:
             # Nothing was stored: the registry row and the record roll back
             # together, even when the commit itself failed. Leave the
-            # instance new, so a retry issues a fresh code.
+            # instance new, with every key as it was, so a retry issues a
+            # fresh code.
             self.public_code = None
-            self.pk = original_pk
+            for name, value in original_keys.items():
+                setattr(self, name, value)
             self._state.adding = True
             raise
         self._loaded_public_code = self.public_code
         self._loaded_pk = self.pk
+
+    def _insert_everywhere(
+        self, force_insert: bool | tuple[models.base.ModelBase, ...] | None
+    ) -> tuple[models.base.ModelBase, ...]:
+        """Force an INSERT into this model's table and every parent's table.
+
+        A new instance carrying an existing pk must not overwrite that row's
+        code. ``force_insert=True`` covers only this model's own table, so a
+        multi-table parent would get UPDATE then INSERT.
+        """
+        tables: list[models.base.ModelBase] = [
+            type(self),
+            *self._meta.get_parent_list(),
+        ]
+        if isinstance(force_insert, tuple):
+            tables.extend(force_insert)
+        return tuple(dict.fromkeys(tables))
+
+    def _key_attnames(self) -> list[str]:
+        """The pk attributes of this model and every parent: what a save sets."""
+        names: list[str] = []
+        for model in [type(self), *self._meta.get_parent_list()]:
+            pk = model._meta.pk
+            if pk is not None and pk.attname not in names:
+                names.append(pk.attname)
+        return names
 
     def _save_existing(self, **kwargs: Any) -> None:
         """Update the stored row. Never insert, and never change a code."""
