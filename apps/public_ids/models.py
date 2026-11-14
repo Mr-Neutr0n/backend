@@ -224,12 +224,18 @@ class PublicCodeModel(models.Model):
         return tuple(dict.fromkeys(tables))
 
     def _key_attnames(self) -> list[str]:
-        """The pk attributes of this model and every parent: what a save sets."""
+        """Every key attribute a save can set: what a failed create resets.
+
+        That is the pk of this model and of every parent, and every parent
+        link at every level. A model with two concrete parents links one of
+        them through a field that is not its pk.
+        """
         names: list[str] = []
         for model in [type(self), *self._meta.get_parent_list()]:
-            pk = model._meta.pk
-            if pk is not None and pk.attname not in names:
-                names.append(pk.attname)
+            fields = [model._meta.pk, *model._meta.parents.values()]
+            for field in fields:
+                if field is not None and field.attname not in names:
+                    names.append(field.attname)
         return names
 
     def _save_existing(self, **kwargs: Any) -> None:
