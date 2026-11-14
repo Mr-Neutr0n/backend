@@ -33,3 +33,36 @@ def thing_model(db: None) -> Iterator[type[PublicCodeModel]]:
         with connection.schema_editor() as editor:
             editor.create_model(Thing)
         yield Thing
+
+
+@pytest.fixture
+def parent_and_child(
+    db: None,
+) -> Iterator[tuple[type[PublicCodeModel], type[PublicCodeModel]]]:
+    """A concrete coded parent and a multi-table child, with their tables.
+
+    The parent holds ``public_code`` and a unique ``label``. The child adds
+    a unique ``nickname`` in its own table.
+    """
+    with isolate_apps("apps.public_ids"):
+
+        class Par(PublicCodeModel):
+            public_code_type = CodeType.PLAYER
+            label = models.CharField(max_length=50, unique=True)
+
+            class Meta:
+                app_label = "public_ids"
+
+            def __str__(self) -> str:
+                return self.label
+
+        class Kid(Par):
+            nickname = models.CharField(max_length=50, unique=True, blank=True)
+
+            class Meta:
+                app_label = "public_ids"
+
+        with connection.schema_editor() as editor:
+            editor.create_model(Par)
+            editor.create_model(Kid)
+        yield Par, Kid
