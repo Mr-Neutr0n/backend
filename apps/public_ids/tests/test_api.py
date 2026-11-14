@@ -24,6 +24,10 @@ class _ThingOut(Schema):
     label: str
 
 
+class _CountIn(Schema):
+    count: int
+
+
 def _api(thing_model: type[PublicCodeModel]) -> OpenNinjaAPI:
     api = OpenNinjaAPI(urls_namespace=f"test-{uuid.uuid4().hex}")
 
@@ -33,6 +37,24 @@ def _api(thing_model: type[PublicCodeModel]) -> OpenNinjaAPI:
         code: Annotated[str, PublicCodePath(CodeType.PLAYER)],
     ) -> PublicCodeModel:
         return get_by_public_code(thing_model._default_manager.all(), code)
+
+    @api.get("/things/{code}/labels", operation_id="list_thing_labels")
+    def list_thing_labels(
+        request: HttpRequest,
+        code: Annotated[str, PublicCodePath(CodeType.PLAYER)],
+        limit: int,
+    ) -> int:
+        get_by_public_code(thing_model._default_manager.all(), code)
+        return limit
+
+    @api.post("/things/{code}/counts", operation_id="count_thing")
+    def count_thing(
+        request: HttpRequest,
+        code: Annotated[str, PublicCodePath(CodeType.PLAYER)],
+        payload: _CountIn,
+    ) -> int:
+        get_by_public_code(thing_model._default_manager.all(), code)
+        return payload.count
 
     return api
 
@@ -128,7 +150,7 @@ def test_unknown_valid_code_is_not_found(client: TestClient) -> None:
 
 @pytest.mark.parametrize(
     "raw",
-    ["x", "P-7K3M-QX9", "P-7K3M-QX9HH", "P%C4%B1", "P-7K3M-QXUH", "0" * 80],
+    ["x", "P-7K3M-QX9", "P-7K3M-QX9HH", "P-7K3M-QXUH", "0" * 80],
 )
 def test_malformed_code_is_not_found(client: TestClient, raw: str) -> None:
     _assert_not_found(client, raw)
@@ -173,3 +195,67 @@ def test_public_code_path_examples_are_valid_for_every_type() -> None:
 
         assert example.startswith(code_type.prefix + "-")
         assert codes.normalize(example, code_type) == example
+
+
+def test_non_ascii_never_folds_into_a_code(
+    client: TestClient,
+    thing_model: type[PublicCodeModel],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # P-7K3M-QX11 is valid. Typed with I for 1 it resolves. Typed with a
+    # dotless i, which uppercases to I, it must not.
+    monkeypatch.setattr("apps.public_ids.models._generate", lambda _: "P-7K3M-QX11")
+    thing_model._default_manager.create(label="made-up one")
+
+    assert client.get("/things/P-7K3M-QXII").status_code == 200
+    _assert_not_found(client, "P-7K3M-QX\N{LATIN SMALL LETTER DOTLESS I}1")
+
+
+# A code path parameter next to other input. A malformed code is always
+# 404. A well-formed code with invalid other input is 422, whether or not
+# a record has that code: the response reveals only well-formedness, which
+# anyone can compute from the published check algorithm, never existence.
+
+
+def _query_response(client: TestClient, code: str) -> tuple[int, bytes]:
+    response = client.get(f"/things/{code}/labels?limit=many")
+    content: bytes = response.content
+    return response.status_code, content
+
+
+def _body_response(client: TestClient, code: str) -> tuple[int, bytes]:
+    response = client.post(f"/things/{code}/counts", json={"count": "many"})
+    content: bytes = response.content
+    return response.status_code, content
+
+
+@pytest.mark.parametrize("send", [_query_response, _body_response])
+def test_malformed_code_with_invalid_input_is_not_found(
+    client: TestClient, send: Any
+) -> None:
+    status, content = send(client, "AB12CD")
+
+    assert status == 404
+    assert content == client.get("/things/AB12CD").content
+
+
+@pytest.mark.parametrize("send", [_query_response, _body_response])
+def test_well_formed_code_with_invalid_input_never_reveals_existence(
+    client: TestClient, thing: PublicCodeModel, send: Any
+) -> None:
+    existing = send(client, thing.public_code)
+    unknown = send(client, codes.generate(CodeType.PLAYER))
+
+    assert existing[0] == 422
+    assert existing == unknown
+
+
+def test_valid_input_resolves_through_the_other_operations(
+    client: TestClient, thing: PublicCodeModel
+) -> None:
+    code = thing.public_code.lower()
+
+    assert client.get(f"/things/{code}/labels?limit=3").json() == 3
+    assert client.post(f"/things/{code}/counts", json={"count": 4}).json() == 4
+    unknown = codes.generate(CodeType.PLAYER)
+    _assert_not_found(client, f"{unknown}/labels?limit=3")
