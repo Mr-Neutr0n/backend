@@ -260,6 +260,7 @@ INSTALLED_APPS = [
     "django_celery_beat",
     "apps.accounts",
     "apps.audit",
+    "apps.public_ids",
 ]
 
 # The OPEN Account login model, keyed on email (apps/accounts).
