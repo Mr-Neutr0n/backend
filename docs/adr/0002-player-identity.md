@@ -27,7 +27,7 @@ Events and other players need to see every player's Rating, so a player cannot h
 - For now, OPEN has no unclaimed Player records. Every Player is created by one Account and belongs to it (#124). An Account has at most one Player.
 - Nobody else creates a Player: not Partners, not CSV uploads, not Organizers, not moderators.
 - So there is nothing to claim, no false-claim process, and no unclaimed personal data.
-- Deleting an Account (#116) removes its personal data but keeps the Player and its Matches in the Ledger. #116 decides how.
+- Deleting an Account (#116) removes its personal data but keeps the Player and its Matches in the Ledger. #116 decides how, and how the Player is shown afterwards.
 
 ### How submissions name players
 
@@ -40,8 +40,8 @@ Events and other players need to see every player's Rating, so a player cannot h
 ### No opt-out
 
 - Profiles are behind authentication, never open to anonymous visitors.
-- Every player's display name and current Rating are always visible to signed-in Accounts and authenticated partner applications. A player cannot hide them, opt out, or pause.
-- This includes players aged 13 to 17. #93's rule that keeps them out of partner sharing until 18 stays.
+- Once Ratings are published, the display name and current Ratings (one per Rating Format) of every Player whose Account is active are always visible to every signed-in Account, minors included. A player cannot hide them, opt out, or pause.
+- Authenticated partner applications see them too, except for players aged 13 to 17, whom #93 keeps out of partner sharing until 18.
 - Privacy settings (#19) cover only other profile details, such as match history, rating history, stats, and home club.
 - A player who wants out deletes their Account (#116).
 
@@ -53,13 +53,15 @@ No unclaimed players exist, so there is no minimum data set for one. Personal da
 
 - A league needs every player to sign up and create a Player before its results are uploaded. #124 already says this.
 - #124's out-of-scope items "Claiming an existing unclaimed record" and "Organizer-created players from a roster" are settled. Neither is planned.
-- #19 drops its "claimed status" task, its criterion "A player can exist without a user (unclaimed)", its "private" profile visibility option, and `opted_out_at`.
+- #19 drops its "claimed status" task, its criterion "A player can exist without a user (unclaimed)", its "private" profile visibility option, `opted_out_at`, its criterion "Opting out is recorded with a timestamp and an audit event", and the opt-out part of its audit task.
+- With no anonymous access, #19's "public" visibility level and its "whether rating history is public" setting, and #93's "can choose to make them public", become the signed-in level.
 - #93's "Unclaimed players" rule becomes: only the player sets birth year, birth month, gender, and legal name, on their own Player.
 - #93's question about unknown ages for unclaimed players does not arise.
 - #93's "private by default" rule for players aged 13 to 17 applies only to the other profile details. Their name and Rating stay visible behind authentication.
 - The "Private player" label in #31 and #56 no longer applies to a player's name. Those issues need rewording.
-- Mentions of opted-out players in #53, #83, #85, #96, and #124 no longer apply.
+- Mentions of opted-out players in #19, #53, #83, #85, #96, and #124 no longer apply. #124's "Private and opted-out profiles return 404 to the public" no longer applies: there are no private or opted-out profiles.
 - #116's retention for unclaimed records has nothing to act on.
+- An open question for #116: can new Matches still name a Player whose Account was deleted, through its OPEN Code or a #82 mapping? This record does not decide it.
 - Issues that assume anonymous reads need authentication or a separate decision: #124's public profile endpoint, #53's rating lookups, and the embeddable rating card (#96, #121). This record does not decide them.
 - Adding unclaimed records later needs a new record that supersedes this one in part. It must first decide how records are created and matched, how a person claims one, how false claims and merges are handled, and the minimum data stored. It must also bring back a way for people named without their consent to refuse being rated. That is where opt-out belongs.
 

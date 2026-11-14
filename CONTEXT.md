@@ -5,11 +5,11 @@ The shared vocabulary for this repository. Use these terms in models, endpoints,
 ## People and accounts
 
 **Player**:
-A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. A Player's display name and current Rating are always visible to signed-in Accounts and authenticated partner applications, and the Player cannot hide them. There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
+A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. Once Ratings are published, an active Player's display name and current Ratings are always visible to every signed-in Account, and the Player cannot hide them. Authenticated partner applications see them too, except for players aged 13 to 17 (#93). There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
 _Avoid_: user, member, athlete.
 
 **Account**:
-A registered OPEN login. An Account creates its own Player, and has at most one. The engine allows a Player with no Account, but the backend does not use that (ADR 0002). Engine: `Player.account_user_id`, `RatingEngine.link_account`. Backend: `accounts.User`, keyed on email.
+A registered OPEN login. An Account creates its own Player, and has at most one. The engine allows a Player with no Account, but the backend never creates one. #116 decides what a deleted Account leaves behind (ADR 0002). Engine: `Player.account_user_id`, `RatingEngine.link_account`. Backend: `accounts.User`, keyed on email.
 _Avoid_: profile (a profile is the view of a Player that others see behind authentication).
 
 **Organizer**:
