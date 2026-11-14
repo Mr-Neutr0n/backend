@@ -5,16 +5,12 @@ The shared vocabulary for this repository. Use these terms in models, endpoints,
 ## People and accounts
 
 **Player**:
-A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
+A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. A Player's display name and current Rating are always visible to signed-in Accounts and authenticated partner applications, and the Player cannot hide them. There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
 _Avoid_: user, member, athlete.
 
 **Account**:
 A registered OPEN login. An Account creates its own Player, and has at most one. The engine allows a Player with no Account, but the backend does not use that (ADR 0002). Engine: `Player.account_user_id`, `RatingEngine.link_account`. Backend: `accounts.User`, keyed on email.
-_Avoid_: profile (a profile is the public view of a Player).
-
-**Opt-out**:
-A pause a Player turns on and off. While opted out, every lookup (profile, rating lookups, rating history, partner reads) answers for the Player exactly as for an unknown OPEN Code. No stats or rankings about the Player are published, the rating card shows no Rating, and webhooks leave the Player out. Other players' match history, Match detail, and stats show the Player as "Private player". Past Matches stay in the Ledger and keep counting for the other players. The Player's own Rating is still computed in Replays but never published to others. New Submissions that name the Player fail, and so does any Submission that names them and is not yet in the Ledger. The Player cannot confirm a pending Submission but can still dispute a Match already in the Ledger. Corrections and reviews of Ledger Matches go on. The Player can still see and export their own data, Rating included. Not a deletion (ADR 0002). Backend: `opted_out_at`.
-_Avoid_: deletion, deactivation.
+_Avoid_: profile (a profile is the view of a Player that others see behind authentication).
 
 **Organizer**:
 A verified person or body that submits results on behalf of an event, club, league, or tournament. An Organizer submission counts as confirmed.
@@ -104,7 +100,7 @@ Running the engine on real results without publishing or relying on its Ratings.
 ## Records
 
 **Audit Event**:
-One recorded sensitive action: who did it (an Account, or nobody), what it changed (the target), the values before and after, and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, privacy changes and opt-out, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
+One recorded sensitive action: who did it (an Account, or nobody), what it changed (the target), the values before and after, and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, privacy changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
 _Avoid_: log entry (Django's admin `LogEntry` is a different thing), history.
 
 ## Governance terms
