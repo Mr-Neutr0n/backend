@@ -384,7 +384,9 @@ def test_issued_code_duplicate_insert_fails(issued: IssuedCode) -> None:
         IssuedCode.objects.create(code=issued.code)
 
 
-def test_a_caller_force_insert_tuple_is_kept(thing_model: Thing) -> None:
+def test_a_caller_force_insert_tuple_naming_the_model_is_accepted(
+    thing_model: Thing,
+) -> None:
     thing = thing_model(label="made-up one")
 
     thing.save(force_insert=(thing_model,))
@@ -394,7 +396,10 @@ def test_a_caller_force_insert_tuple_is_kept(thing_model: Thing) -> None:
     )
 
 
-def test_a_caller_force_insert_tuple_must_name_a_base(thing_model: Thing) -> None:
+def test_a_caller_force_insert_tuple_reaches_django(thing_model: Thing) -> None:
+    # Every valid member is a model save() already forces, so only a bad
+    # member shows the caller's tuple is kept: if save() dropped it, Django
+    # would never see IssuedCode and the save would succeed.
     thing = thing_model(label="made-up one")
 
     with pytest.raises(TypeError):
