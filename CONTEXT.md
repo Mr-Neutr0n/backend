@@ -23,7 +23,7 @@ _Avoid_: customer, client, vendor.
 A Player's identifier in another system, keyed by source. Used for identity matching, never as the OPEN primary key. Engine: `Player.external_ids`.
 
 **OPEN Code**:
-The public identifier OPEN issues to a Player, Club, Event, Organizer, or Match, such as `P-7K3M-QX9H`. A type prefix, random characters, and a check character. It never changes and is never issued again. APIs, exports, and URLs use it; the database row id never leaves the backend. An External ID comes from another system and is only used for matching; an OPEN Code is OPEN's own. Backend: `public_code`, `public_ids.PublicCodeModel` (ADR 0008).
+The public identifier OPEN issues to a Player, Club, Event, Organizer, or Match, such as `P-7K3M-QX9H`. A type prefix, random characters, and a check character. It never changes and is never issued again. APIs, exports, and URLs use it; row ids never appear in the API. An External ID comes from another system and is only used for matching; an OPEN Code is OPEN's own. Backend: `public_code`, `public_ids.PublicCodeModel` (ADR 0008).
 _Avoid_: OPEN ID, player ID, row id.
 
 ## Matches and results

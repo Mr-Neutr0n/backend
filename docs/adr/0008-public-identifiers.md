@@ -22,10 +22,10 @@ Players and organizers will read codes aloud and type them. A typo must be rejec
 - Check character: Luhn mod 32 over the prefix and the random characters. It catches every single-character substitution, and so a code moved to another type. It catches most swaps of two neighboring characters.
 - Generation: the random characters come from `secrets`, never from the row id or the time.
 - Registry: every issued code is stored in `IssuedCode`, with a unique constraint. A code is never issued again, even after its record is deleted or opted out. The ORM refuses to change or delete a registry row.
-- Collisions: on create, a new code is inserted into the registry inside a savepoint. A unique-constraint collision is retried with a fresh code, up to 5 attempts, then `PublicCodeExhausted` is raised. The record insert runs in the same transaction, so a failed insert also rolls back its registry row.
-- A code never changes. `save()` refuses a changed code on an existing record, and refuses a code set by hand on a new one.
+- Collisions: on create, a new code is inserted into the registry inside a savepoint. A code that is already in the registry, or that a record of the same model already holds, is a collision. A collision is retried with a fresh code, up to 5 attempts, then `PublicCodeExhausted` is raised. The record insert runs in the same transaction, so a failed insert also rolls back its registry row.
+- A code never changes. `save()` refuses a changed code on an existing record, and refuses a code set by hand on a new one. Saving an existing record only ever updates its row: it raises if the record was deleted or its row is gone, and it compares the code with the one stored for the pk being written. If a create fails, even at commit, the instance is left new, so a retry issues a fresh code.
 - Input normalization, in order: refuse anything that is not ASCII or is longer than 64 characters; uppercase; drop spaces and hyphens; check the prefix (the endpoint's prefix may be omitted, any other prefix is refused); map I and L to 1 and O to 0; refuse characters outside the alphabet; verify the length and the check character. The result is the canonical form.
-- API: a path parameter is `Annotated[str, PublicCodePath(CodeType.X)]`. A malformed code and a well-formed code that matches no record both return the same 404 `ErrorResponse`. Neither returns a 422, so a client cannot learn which codes are well formed.
+- API: a path parameter is `Annotated[str, PublicCodePath(CodeType.X)]`. `PublicCodePath` is for path parameters only, not body or response fields. A code path parameter that fails returns 404, not 422. This narrows ADR 0005's rule that validation errors return 422, for this parameter only. When the operation's other inputs are valid, a malformed code and a well-formed code that matches no record get the same 404 `ErrorResponse`. When another input is invalid, a malformed code still gets 404, but a well-formed code gets the 422 for that input, whether or not a record has it. So no response reveals whether a record exists. A response can reveal only whether a code is well formed, which anyone can compute from the published check algorithm.
 
 ### Collision math
 
@@ -42,7 +42,8 @@ A standard external rating system uses 6-character player IDs. An OPEN Code has 
 ## Consequences
 
 - Partners can store codes forever, and a code cannot be guessed by counting.
-- `bulk_create`, `QuerySet.update`, and raw SQL skip code generation and the no-change rule. `bulk_create` without a code fails, because the column is NOT NULL with no default. Create records through `save()` or `objects.create()`.
+- Fixtures (`loaddata`), `bulk_create`, `QuerySet.update`, and raw SQL skip issuance and the no-change rule, and must not set codes. Create records through `save()` or `objects.create()`. The field's default is None, so a write that skips `save()` and sets no code fails on NOT NULL. A code written another way has no registry row; issuance still treats it as a collision while a record holds it.
+- To copy a record, set `public_code = None`, `pk = None`, and `_state.adding = True` before saving. The copy gets a fresh code.
 - The registry grows forever. Its rows are small.
 - There is no database trigger on the registry. Raw SQL can delete its rows, so the ORM guard protects only app code.
 - Lookups compare the canonical form exactly, so normalization must run first. The path parameter type does that.
@@ -53,4 +54,4 @@ A standard external rating system uses 6-character player IDs. An OPEN Code has 
 - **Hashids or Sqids of the row id.** Reversible with the salt, and they still leak counts and order.
 - **No check character.** A typo could resolve to another player.
 - **No registry.** A deleted record's code could be issued again and point a partner's stored mapping at someone else.
-- **A pattern in the OpenAPI schema.** Ninja would enforce it with a 422, which tells a client which codes are well formed.
+- **A pattern in the OpenAPI schema.** Ninja would enforce it with a 422, so a malformed code would not get the same 404 as an unknown one.

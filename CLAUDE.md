@@ -52,8 +52,8 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 ## Public identifiers
 
 - A model whose records have a public identity (Player, Club, Event, Organizer, Match) inherits `apps.public_ids.models.PublicCodeModel` and sets `public_code_type`. The system check `public_ids.E001` reports a concrete subclass without one. ADR 0008 records the scheme.
-- Codes are created only by `save()` (or `objects.create()`), which issues the code, records it in `IssuedCode`, and refuses to change it later. `bulk_create`, `QuerySet.update`, and raw SQL skip all of this.
-- Never expose or accept a row id in the API. A path parameter that names a record is `Annotated[str, PublicCodePath(CodeType.X)]`, and the view looks the record up with `get_by_public_code()`. A malformed code returns the same 404 as an unknown one. A test fails on any integer `id`, `pk`, or `*_id` in the OpenAPI document.
+- Codes are created only by `save()` (or `objects.create()`), which issues the code, records it in `IssuedCode`, and refuses to change it later. Fixtures (`loaddata`), `bulk_create`, `QuerySet.update`, and raw SQL skip all of this and must not set codes. To copy a record, set `public_code = None`, `pk = None`, and `_state.adding = True` before saving. Saving a deleted record raises.
+- Never expose or accept a row id in the API. A path parameter that names a record is `Annotated[str, PublicCodePath(CodeType.X)]`, and the view looks the record up with `get_by_public_code()`. `PublicCodePath` is for path parameters only, not body or response fields. A test fails on any numeric `id`, `pk`, `*_id`, `*Id`, or plural of these in the OpenAPI document, hidden operations included.
 - To read a code from other input (such as a CSV column), use `apps.public_ids.codes.normalize()`, then look up the canonical form.
 
 ## API
@@ -62,6 +62,7 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - Every operation passes an explicit `operation_id`. It names the method in the generated client, so never change one for a rename. Building the OpenAPI document raises an error for an operation in the document that has none, and a test checks every operation.
 - Validation errors, an unparsable body, `Http404`, and `HttpError` come back as `ErrorResponse` (`config/api_errors.py`), and validation errors return 422. With DEBUG off, any other exception goes to Django, which returns its own HTML error page (a 500, or another status for exceptions Django maps, such as 403 for `PermissionDenied`). Raise `HttpError` or `Http404` instead of returning an error body by hand (the readiness check's 503 is not an error: it is a status report with its own documented schema), and use `HttpError(403, ...)`, never Django's `PermissionDenied`. Never declare a different 422 schema on an operation that takes input: building the document raises an error if you do. ADR 0005 records the versioning and error format.
 - Never put the submitted value in a validation message. The 422 response returns the message to the client.
+- A code path parameter (`PublicCodePath`) that fails returns 404, not 422, which narrows the 422 rule for that parameter (ADR 0008). With the other inputs valid, a malformed code and an unknown one get the same 404. With another input invalid, a well-formed code gets that input's 422 whether or not a record has it, so no response reveals that a record exists.
 
 ## Settings
 

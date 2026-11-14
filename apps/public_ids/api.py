@@ -17,9 +17,15 @@ record takes its public code:
 The parameter accepts any case, spaces and hyphens, a missing prefix, and
 I, L, or O for 1 or 0, and the view receives the canonical form. Malformed
 input (the wrong prefix, a failed check, a 6-character external ID) raises
-``Http404``, so the client gets the same 404 ``ErrorResponse`` as for a
-well-formed code that matches no record: never a 422 that would tell them
-which codes are well formed.
+``Http404``, not a validation error. This narrows ADR 0005's 422 rule for
+this parameter. When the operation's other inputs are valid, a malformed
+code gets the same 404 ``ErrorResponse`` as a well-formed code that matches
+no record. When another input is invalid, a well-formed code gets that
+input's 422, whether or not a record has it. No response reveals whether a
+record exists, only whether a code is well formed, which anyone can compute
+from the published check algorithm.
+
+Use ``PublicCodePath`` for path parameters only, not body or response fields.
 """
 
 from dataclasses import dataclass
