@@ -117,10 +117,18 @@ def _generate(code_type: CodeType) -> str:
     return codes.generate(code_type)
 
 
-def _issue_code(code_type: CodeType, using: str) -> str:
-    """Record and return a code that has never been issued."""
+def _issue_code(model: type["PublicCodeModel"], using: str) -> str:
+    """Record and return a code that has never been issued.
+
+    A code is a collision if the registry has it, or if a record of
+    ``model`` already holds it (a code written outside ``save()`` has no
+    registry row).
+    """
+    code_type = model.public_code_type
     for _ in range(MAX_ATTEMPTS):
         code = _generate(code_type)
+        if model._base_manager.using(using).filter(public_code=code).exists():
+            continue
         try:
             # A savepoint, so a collision leaves the caller's transaction usable.
             with transaction.atomic(using=using):
@@ -141,9 +149,15 @@ class PublicCodeModel(models.Model):
     """A record with a public code, issued once on create and never changed.
 
     Concrete subclasses set ``public_code_type``. Create records through
-    ``save()`` or ``objects.create()``: ``bulk_create``, ``QuerySet.update``,
-    and raw SQL skip code generation and the no-change rule. ``bulk_create``
-    without a code fails, since the column is NOT NULL.
+    ``save()`` or ``objects.create()``. Fixtures (``loaddata``),
+    ``bulk_create``, ``QuerySet.update``, and raw SQL skip issuance and the
+    no-change rule, and must not set codes. The field's default is None, so
+    such a write without a code fails on NOT NULL.
+
+    To copy a record, set ``public_code = None``, ``pk = None``, and
+    ``_state.adding = True`` before saving: the copy gets a fresh code.
+    Saving a deleted record raises, and so does saving a record whose row
+    is gone.
     """
 
     public_code_type: ClassVar[CodeType]
@@ -155,6 +169,7 @@ class PublicCodeModel(models.Model):
     )
 
     _loaded_public_code: object
+    _loaded_pk: object
 
     class Meta:
         abstract = True
@@ -163,8 +178,7 @@ class PublicCodeModel(models.Model):
         if args:
             raise TypeError("Pass save() options by keyword.")
         if not self._state.adding:
-            self._refuse_code_change()
-            super().save(**kwargs)
+            self._save_existing(**kwargs)
             return
         if self.public_code is not None:
             raise ValueError("A public code is only ever generated, never set.")
@@ -172,16 +186,34 @@ class PublicCodeModel(models.Model):
         # overwrite that row's code.
         kwargs["force_insert"] = kwargs.get("force_insert") or True
         using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
-        with transaction.atomic(using=using):
-            self.public_code = _issue_code(self.public_code_type, using)
-            try:
+        original_pk = self.pk
+        try:
+            with transaction.atomic(using=using):
+                self.public_code = _issue_code(type(self), using)
                 super().save(**kwargs)
-            except BaseException:
-                # A retry of this instance gets a fresh code. The registry
-                # row rolls back with the transaction.
-                self.public_code = None
-                raise
+        except BaseException:
+            # Nothing was stored: the registry row and the record roll back
+            # together, even when the commit itself failed. Leave the
+            # instance new, so a retry issues a fresh code.
+            self.public_code = None
+            self.pk = original_pk
+            self._state.adding = True
+            raise
         self._loaded_public_code = self.public_code
+        self._loaded_pk = self.pk
+
+    def _save_existing(self, **kwargs: Any) -> None:
+        """Update the stored row. Never insert, and never change a code."""
+        if self.pk is None:
+            raise ValueError(
+                "This record has no primary key: it was deleted. "
+                "Save a new instance to create a record."
+            )
+        self._refuse_code_change()
+        # Only update: if the row is gone (deleted, or its create rolled
+        # back), Django raises instead of inserting it with this code.
+        kwargs["force_update"] = True
+        super().save(**kwargs)
 
     @classmethod
     def from_db(
@@ -193,8 +225,9 @@ class PublicCodeModel(models.Model):
         **kwargs: Any,
     ) -> Self:
         instance = super().from_db(db, field_names, values, *args, **kwargs)
-        # Remember the loaded code, so save() can refuse a changed one.
+        # Remember the loaded row and code, so save() can refuse a changed one.
         instance._loaded_public_code = instance.__dict__.get("public_code", _NOT_LOADED)
+        instance._loaded_pk = instance.pk
         return instance
 
     def _refuse_code_change(self) -> None:
@@ -202,6 +235,9 @@ class PublicCodeModel(models.Model):
             # Deferred and never touched: save() does not write it.
             return
         loaded = getattr(self, "_loaded_public_code", _NOT_LOADED)
+        if self.pk != getattr(self, "_loaded_pk", _NOT_LOADED):
+            # Pointed at another row: compare with the code stored there.
+            loaded = _NOT_LOADED
         if loaded is _NOT_LOADED:
             loaded = (
                 type(self)
