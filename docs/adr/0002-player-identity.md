@@ -12,7 +12,7 @@ Issue #1 left a question open (decision Q9): partner and CSV submissions may nam
 - What does opt-out mean?
 - What is the minimum personal data stored for an unclaimed player?
 
-Earlier decisions already narrowed this. Partners send OPEN Codes or their own player IDs that are mapped (#82) or linked through Log in with OPEN (#75). An unmapped ID fails that match, and partner submissions never create unclaimed players (decision F5). CSV uploads use OPEN Codes only for now. An unknown code fails that row, and no Player is found or created from a name (decision F13). That left organizer rosters as the only remaining source of unclaimed records.
+Earlier decisions already narrowed this. Partners send OPEN Codes or their own player IDs that are mapped (#82) or linked through Log in with OPEN (#75). An unmapped ID fails that Submission, and partner submissions never create unclaimed players (decision F5). CSV uploads use OPEN Codes only for now. An unknown code fails that row, and no Player is found or created from a name (decision F13). That left organizer rosters as the only remaining source of unclaimed records.
 
 The engine supports Player records with no Account (`Player.account_user_id` is optional, and `RatingEngine.link_account` links one later). The backend does not have to use that.
 
@@ -35,7 +35,7 @@ Events and other players need to see every player's Rating, so a player cannot h
 - They name a player only by OPEN Code (ADR 0008), by a confirmed platform mapping (#82), or by a Log in with OPEN link (#75).
 - CSV uploads use OPEN Codes only for now (decision F13).
 - A name never finds or creates a Player.
-- An unknown or unmapped ID fails that Match, or that CSV row.
+- An unknown or unmapped ID fails that Submission, or that CSV row.
 
 ### No opt-out
 
@@ -60,7 +60,7 @@ No unclaimed players exist, so there is no minimum data set for one. Personal da
 - #93's question about unknown ages for unclaimed players does not arise.
 - #93's "private by default" rule for players aged 13 to 17 applies only to the other profile details. Their name and current Ratings stay visible to signed-in Accounts.
 - The "Private player" label in #31 and #56 no longer applies to a player's name. Those issues need rewording.
-- Mentions of opted-out players in #19, #53, #83, #85, #96, and #124 no longer apply. #124's "Private and opted-out profiles return 404 to the public" no longer applies: there are no private or opted-out profiles.
+- Mentions of opted-out players in #19, #53, #83, #85, #96, and #124 no longer apply. #124's "Private and opted-out profiles return 404 to the public" no longer applies: no profile can hide its name and Ratings, and none is opted out.
 - #116's retention for unclaimed records has nothing to act on.
 - An open question for #116: can new Matches still name a Player whose Account was deleted, through its OPEN Code or a #82 mapping? This record does not decide it.
 - Issues that assume anonymous reads need authentication or a separate decision: #124's public profile endpoint, #53's rating lookups, and the embeddable rating card (#96, #121). This record does not decide them.
@@ -72,5 +72,5 @@ No unclaimed players exist, so there is no minimum data set for one. Personal da
 - **Claim by request and approval.** A person asks for a record and a moderator approves. It has the same problems, plus moderator load.
 - **Partner or CSV creation from names.** Already refused by decisions F5 and F13. Names cause mismatches.
 - **Opt-out as a pause that refuses new Matches.** It is complex, its errors leak the pause to submitters, and it hides Ratings that events need.
-- **A private profile setting that hides name and Rating.** Events could not see Ratings.
+- **A private profile setting that hides name and Ratings.** Events could not see Ratings.
 - **Deleting Matches when a player leaves.** This breaks the append-only Ledger (hard rule 3) and changes other players' Ratings.
