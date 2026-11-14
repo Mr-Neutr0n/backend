@@ -67,7 +67,7 @@ Only the player sets these, on their own Player. No Organizer, Partner, CSV uplo
 
 ### Identifying personal data fields
 
-The identifying personal data fields are the email address, display name, legal name, birth year and month, gender division, and city and region. Rules in this record that name this set apply only to it. All personal data, identifying or not, is listed in the inventory. Audit Events may record the values of other personal data: Ratings and Matches (ADR 0007), permissions, and privacy settings (#19's privacy change audit task). The display name is in the set because a name kept in old Audit Events would undo Account deletion.
+The identifying personal data fields are the email address, display name, legal name, birth year and month, gender division, city and region, External IDs (#49), and platform player IDs (#82). The set holds every field that names, ages, locates, or points to the person outside OPEN, since any of them in an old Audit Event would re-identify a deleted Player. Rules in this record that name this set apply only to it: the audit rule below, and what a kept Account row has cleared. Account deletion is wider and removes all personal data (Retention). All personal data, identifying or not, is listed in the inventory. Audit Events may record the values of other personal data: Ratings and Matches (ADR 0007), permissions, and privacy settings (#19's privacy change audit task).
 
 ### What OPEN does not collect
 
@@ -91,11 +91,12 @@ The identifying personal data fields are the email address, display name, legal 
 Personal data stays while the Account exists. There is no automatic deletion of active or inactive Accounts.
 
 - A refused under-13 attempt to create a Player keeps nothing.
-- Deleting an Account removes its identifying personal data from the live database at once, and ends and deletes its sessions (#116). What stays, and why:
+- Deleting an Account removes all of its personal data from the live database at once, and ends and deletes its sessions (#116), except what this list names. What stays, and why:
   - The Player, with its OPEN Code, Matches, and Ratings (the Ledger, ADR 0002, hard rule 3).
-  - Audit Events, which never hold an identifying field's value (ADR 0007).
+  - Audit Events, which are append-only (ADR 0007) and never hold an identifying field's value (the audit rule in this record).
   - For an Account that has acted, its row with the identifying fields cleared (`PROTECT`, ADR 0007).
   - None of these keeps a name, email, or age.
+- Everything else the inventory lists for that Account or Player goes. Examples: home club, privacy settings, External ID and external rating (#49), platform player IDs (#82), email addresses, MFA authenticators, and Log in with OPEN grants.
 - A player found to be under 13: a moderator removes their personal data the same way (#114).
 - Backups age deleted personal data out within 30 days (#67).
 - Logs (#66) and error reports (#65) hold no personal data and are kept 30 days.
@@ -105,14 +106,16 @@ Personal data stays while the Account exists. There is no automatic deletion of 
 
 ## Consequences
 
-- #19 adds the Player fields above, its privacy settings, and its OPEN Code, and no other personal data field. It drops nothing beyond what ADR 0002 dropped. `Player.__str__` must return the Player's OPEN Code, never the display name or legal name, so Django's admin log `object_repr` never holds a name. Its privacy settings need a most-restrictive level for players aged 13 to 17.
+- #19 adds the Player fields above, its privacy settings, and its OPEN Code, and no other personal data field. It drops nothing beyond what ADR 0002 dropped. `Player.__str__` returns the Player's OPEN Code (see the admin log rule below). Its privacy settings need a most-restrictive level for players aged 13 to 17.
 - #114 builds the age screen, the 13-and-older refusal, the end-of-month rule, and the removal of an under-13 player's personal data. Its task "Players aged 13 to 17 start with profile visibility set to private" means the other profile details only (ADR 0002).
 - #115 encrypts legal name, birth year and month, and gender division ("gender" in #115 means the gender division). It audits staff access, and adds the check that every personal data field is in the inventory. Its task "the seed command (#41) never includes these fields" now means the seed command sets only made-up values for them, since a Player needs a birth year and month.
-- #116 deletes identifying personal data on Account deletion and runs the session cleanup. Its criterion "no personal data about the player remains" means identifying personal data, per this record. It has no unclaimed records to age out (ADR 0002) and no inactivity deletion to run. `AuditEvent.actor_user` uses `PROTECT` (ADR 0007), so an Account that has acted is kept as a deactivated row with its identifying fields cleared. Any other Account row may be deleted. #116 decides the mechanics.
+- #116 deletes all personal data on Account deletion and runs the session cleanup. Its criterion "no personal data about the player remains" means all personal data except the "What stays" list in Retention. It has no unclaimed records to age out (ADR 0002) and no inactivity deletion to run. `AuditEvent.actor_user` uses `PROTECT` (ADR 0007), so an Account that has acted is kept as a deactivated row with its identifying fields cleared. Any other Account row may be deleted. #116 decides the mechanics.
 - #67 sets backup retention so deleted personal data is gone from backups within 30 days.
 - #39's export includes every field in the inventory that belongs to the player.
 - Every planned personal data field goes in the inventory when it lands.
-- Django's admin log (`django.contrib.admin.models.LogEntry`) stores an object's string form in `object_repr`. An Account's string form is its email address (`User.__str__` returns `self.email`). #116 must clear it on deletion.
+- No model's `__str__` returns an identifying field, so Django's admin log (`django.contrib.admin.models.LogEntry.object_repr`) and admin messages never hold one. For example, `Player.__str__` returns the OPEN Code.
+- `accounts.User.__str__` returns the email address today (`self.email`). This is the known exception. #116 clears every admin log entry tied to the deleted Account: its own, and any for a record that belongs to it.
+- allauth's `EmailAddress` (#30) returns the email address from `__str__`. #30 or #116 must handle it the same way.
 - Partner integrations cannot look up or receive data about players aged 13 to 17 until they turn 18. Matches a Partner submits that name them still count (#32).
 - The age bands are not fixed here.
 

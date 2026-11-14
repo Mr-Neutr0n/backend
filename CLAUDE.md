@@ -62,7 +62,8 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - Never store a full birthdate (store birth year and month only), a raw gender, a street address, a phone number, or payment data.
 - Only the player sets their own display name, legal name, birth year and month, gender division, and city and region. Others may only remove them (#114, #116).
 - Every path that creates a Player refuses anyone under 13, and a new Player always has a birth year and month. Players aged 13 to 17 are left out of all partner sharing. A Player whose birth year and month were removed (#114, #116) is excluded from all partner sharing, permanently.
-- The identifying personal data fields are email, display name, legal name, birth year and month, gender division, and city and region. An Audit Event about one of them records the field's name, never its value.
+- The identifying personal data fields are email, display name, legal name, birth year and month, gender division, city and region, External IDs (#49), and platform player IDs (#82). An Audit Event about one of them records the field's name, never its value. Account deletion is wider: it removes all personal data except what ADR 0009's Retention section keeps.
+- No model's `__str__` returns an identifying field, so the admin log's `object_repr` and admin messages never hold one (a Player's returns its OPEN Code). `accounts.User.__str__` returns the email, the known exception: #116 clears the admin log entries tied to a deleted Account.
 
 ## API
 
