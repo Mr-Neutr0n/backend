@@ -5,12 +5,12 @@ The shared vocabulary for this repository. Use these terms in models, endpoints,
 ## People and accounts
 
 **Player**:
-A person who plays matches and has ratings. A Player record can exist and collect OPEN matches before that person registers. Engine: `Player`.
+A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. Once Ratings are published, the display name and current Ratings of a Player whose Account is active are always visible to every signed-in Account, and the Player cannot hide them. Authenticated partner applications see them too, except for players aged 13 to 17 (#93). There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
 _Avoid_: user, member, athlete.
 
 **Account**:
-A registered OPEN login. An Account can claim an existing Player record ("linking"). Players and Accounts are separate so that results can be recorded for people who have not signed up. Engine: `Player.account_user_id`, `RatingEngine.link_account`. Backend: `accounts.User`, keyed on email.
-_Avoid_: profile (a profile is the public view of a Player).
+A registered OPEN login. An Account creates its own Player, and has at most one. The engine allows a Player with no Account, but the backend never creates one. #116 decides what a deleted Account leaves behind (ADR 0002). Engine: `Player.account_user_id`, `RatingEngine.link_account`. Backend: `accounts.User`, keyed on email.
+_Avoid_: profile (a profile is the view of a Player that others see behind authentication).
 
 **Organizer**:
 A verified person or body that submits results on behalf of an event, club, league, or tournament. An Organizer submission counts as confirmed.
@@ -100,7 +100,7 @@ Running the engine on real results without publishing or relying on its Ratings.
 ## Records
 
 **Audit Event**:
-One recorded sensitive action: who did it (an Account, or nobody), what it changed (the target), the values before and after, and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
+One recorded sensitive action: who did it (an Account, or nobody), what it changed (the target), the values before and after, and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, privacy changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
 _Avoid_: log entry (Django's admin `LogEntry` is a different thing), history.
 
 ## Governance terms

@@ -42,17 +42,14 @@ Each option we rejected, and why.
 
 ## Planned records
 
-Many decisions are already made in GitHub issue #1 (the backend plan). Records turn them into permanent documents:
-
-- 0002: unclaimed players, claiming, and opt-out (issue #18; decision Q9)
-
-Other choices from issue #1 that may deserve a record later: how the append-only Ledger is enforced, incremental updates versus replay (Q6), engine pinning (Q4), and partner API authentication (Q2, Q3).
+Many decisions are already made in GitHub issue #1 (the backend plan). Records turn them into permanent documents. Choices from issue #1 that may deserve a record later: how the append-only Ledger is enforced, incremental updates versus replay (Q6), engine pinning (Q4), and partner API authentication (Q2, Q3).
 
 ## Index
 
 Add each record here when it merges.
 
 - [0001. Why Django](0001-django.md) (issue #16)
+- [0002. Player identity: no unclaimed players, and no opt-out](0002-player-identity.md) (issue #18)
 - [0003. Email identity for Accounts](0003-email-identity-for-accounts.md) (issue #3)
 - [0004. Settings from the environment, secure by default](0004-settings-from-the-environment.md) (issue #4)
 - [0005. API versioning and error format](0005-api-versioning-and-error-format.md) (issue #5)
