@@ -67,7 +67,7 @@ Only the player sets these, on their own Player. No Organizer, Partner, CSV uplo
 
 ### Identifying personal data fields
 
-The identifying personal data fields are the email address, display name, legal name, birth year and month, gender division, city and region, External IDs (#49), and platform player IDs (#82). The set holds every field that names, ages, locates, or points to the person outside OPEN, since any of them in an old Audit Event would re-identify a deleted Player. Rules in this record that name this set apply only to it: the audit rule below, and what a kept Account row has cleared. Account deletion is wider and removes all personal data (Retention). All personal data, identifying or not, is listed in the inventory. Audit Events may record the values of other personal data: Ratings and Matches (ADR 0007), permissions, and privacy settings (#19's privacy change audit task).
+The identifying personal data fields are the email address, display name, legal name, birth year and month, gender division, city and region, External IDs (#49), and platform player IDs (#82). The set holds every field that names, ages, locates, or points to the person outside OPEN, since any of them in an old Audit Event would re-identify a deleted Player. Rules in this record that name this set apply only to the set. Account deletion is wider and removes all personal data (Retention). All personal data, identifying or not, is listed in the inventory. Audit Events may record the values of other personal data: Ratings and Matches (ADR 0007), permissions, and privacy settings (#19's privacy change audit task).
 
 ### What OPEN does not collect
 
@@ -96,13 +96,16 @@ Personal data stays while the Account exists. There is no automatic deletion of 
   - Audit Events, which are append-only (ADR 0007) and never hold an identifying field's value (the audit rule in this record).
   - For an Account that has acted, its row with the identifying fields cleared (`PROTECT`, ADR 0007).
   - None of these keeps a name, email, or age.
-- Everything else the inventory lists for that Account or Player goes. Examples: home club, privacy settings, External ID and external rating (#49), platform player IDs (#82), email addresses, MFA authenticators, and Log in with OPEN grants.
+- Everything else the inventory lists for that Account or Player goes, with two exceptions below: uploaded results files age out within 30 days, and copies held by outside processors follow #35. Examples of what goes: home club, privacy settings, External ID and external rating (#49), platform player IDs (#82), email addresses, MFA authenticators, and Log in with OPEN grants.
+- Deleting platform player IDs at Account deletion settles the #82 half of ADR 0002's open question on whether new Matches can name a deleted Player. The OPEN Code half stays with #116.
+- An uploaded CSV results file is deleted within 30 days of processing (#71). Its results live on in the Ledger. The 30 days let the Organizer review the validation report and download again what they sent. Because the file is gone within 30 days, Account deletion does not scrub players from stored files.
+- Copies held by outside processors, such as the email provider (#35), follow that provider's retention. #35 records it and keeps it as short as the provider allows.
 - A player found to be under 13: a moderator removes their personal data the same way (#114).
 - Backups age deleted personal data out within 30 days (#67).
 - Logs (#66) and error reports (#65) hold no personal data and are kept 30 days.
 - Audit Events are kept indefinitely (they are append-only, ADR 0007). They never hold the value of an identifying personal data field.
 - Expired sessions are removed by a scheduled task (#116). Deleting an Account also deletes its sessions (#116).
-- A data export file (#39) is deleted when its download link expires.
+- A data export file (#39) is deleted when its download link expires, or at Account deletion, whichever comes first.
 
 ## Consequences
 
@@ -112,6 +115,7 @@ Personal data stays while the Account exists. There is no automatic deletion of 
 - #116 deletes all personal data on Account deletion and runs the session cleanup. Its criterion "no personal data about the player remains" means all personal data except the "What stays" list in Retention. It has no unclaimed records to age out (ADR 0002) and no inactivity deletion to run. `AuditEvent.actor_user` uses `PROTECT` (ADR 0007), so an Account that has acted is kept as a deactivated row with its identifying fields cleared. Any other Account row may be deleted. #116 decides the mechanics.
 - #67 sets backup retention so deleted personal data is gone from backups within 30 days.
 - #39's export includes every field in the inventory that belongs to the player.
+- #71 deletes each raw uploaded CSV results file within 30 days of processing, so Account deletion needs no per-player scrubbing of files.
 - Every planned personal data field goes in the inventory when it lands.
 - No model's `__str__` returns an identifying field, so Django's admin log (`django.contrib.admin.models.LogEntry.object_repr`) and admin messages never hold one. For example, `Player.__str__` returns the OPEN Code.
 - `accounts.User.__str__` returns the email address today (`self.email`). This is the known exception. #116 clears every admin log entry tied to the deleted Account: its own, and any for a record that belongs to it.

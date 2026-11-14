@@ -47,8 +47,8 @@ These fields do not exist yet. The issue that adds a field moves its row to the 
 | Organizer records and club roles (planned, #20) | Organizer verification, and the Account behind a club role. | Set by #20. | The Account's personal data goes at Account deletion (#116). Otherwise set by #20. | Set by #20. |
 | Who confirmed or disputed a Match (planned, #26) | Confirmation of reported scores. | Set by #26. | Kept with the Match in the Ledger (ADR 0002), with the Account's personal data removed at Account deletion (#116). Otherwise set by #26. | Set by #26. |
 | OAuth application requests: the applicant Account and contact details (planned, #29) | Partner application review. | Set by #29. | Until Account deletion (#116). Otherwise set by #29. | Set by #29. |
-| Recipient addresses sent to the email provider (planned, #35) | Sending account email. | Set by #35. | Set by #35. | Set by #35. |
-| Uploaded CSV results files (planned, #71) | Organizer result uploads. | Set by #71. | Set by #71. | Set by #71. |
+| Recipient addresses sent to the email provider (planned, #35) | Sending account email. | Set by #35. | A copy outside OPEN's database. It follows the email provider's retention, which #35 records and keeps as short as the provider allows. | Set by #35. |
+| Uploaded CSV results files (planned, #71) | Organizer result uploads. | Set by #71. | Raw file deleted within 30 days of processing (#71). Its results live on in the Ledger. | Set by #71. |
 | MFA authenticators: TOTP secrets, recovery codes, passkeys (planned, #99, #117) | Account security. These are secrets. | Never shown. Otherwise set by #99 and #117. | Until Account deletion (#116). Otherwise set by #99 and #117. | Set by #99 and #117. |
 | Login limits and sign-in alerts, including any IP address or device data stored (planned, #100) | Account security. | Set by #100. | Until Account deletion (#116). Otherwise set by #100. | Set by #100. |
 | Duplicate External ID flags (planned, #123) | Duplicate detection. | Set by #123. | Until Account deletion (#116). Otherwise set by #123. | Set by #123. |
