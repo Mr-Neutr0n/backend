@@ -17,5 +17,8 @@
 # Audit log, append-only: the record of rating, match, and moderation changes.
 /apps/audit/ @openpickleball/maintainers
 
+# Public identifiers partners store forever; codes must resist enumeration.
+/apps/public_ids/ @openpickleball/maintainers
+
 # CI, the DCO check, and this file.
 /.github/ @openpickleball/maintainers

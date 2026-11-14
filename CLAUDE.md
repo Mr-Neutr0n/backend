@@ -14,7 +14,7 @@ Planned services, from the project roadmap:
 
 ## Current status
 
-The Django project scaffold exists (`config`, with settings read from the environment, plus `apps/accounts` with the custom email-login user model and the first migration, `apps/audit` with the append-only audit log (`AuditEvent`, `record_event`), `config/api.py` with the django-ninja API mounted at `/api/v1/` with the health checks in `config/health.py` as its only operations so far, the Celery app in `config/celery.py`, configured in the Celery section of `config/settings.py` (four queues, django-celery-beat), static files through WhiteNoise, CORS for `/api/` through django-cors-headers, `gunicorn.conf.py` for serving, and `compose.yaml` for local services), and no OPEN rating is live. The work is planned as GitHub issues grouped into outcome milestones (v0.1 MVP through v0.4), epics with sub-issues, native blocked-by links, and the "OPEN backend" org project board. Issue #1 records the plan's decisions and open questions; other issues cite them as "decisions Qn" or "Fn". Read the relevant ones before starting an issue.
+The Django project scaffold exists (`config`, with settings read from the environment, plus `apps/accounts` with the custom email-login user model and the first migration, `apps/audit` with the append-only audit log (`AuditEvent`, `record_event`), `apps/public_ids` with OPEN Codes (`PublicCodeModel`, the `IssuedCode` registry, the `PublicCodePath` path parameter), `config/api.py` with the django-ninja API mounted at `/api/v1/` with the health checks in `config/health.py` as its only operations so far, the Celery app in `config/celery.py`, configured in the Celery section of `config/settings.py` (four queues, django-celery-beat), static files through WhiteNoise, CORS for `/api/` through django-cors-headers, `gunicorn.conf.py` for serving, and `compose.yaml` for local services), and no OPEN rating is live. The work is planned as GitHub issues grouped into outcome milestones (v0.1 MVP through v0.4), epics with sub-issues, native blocked-by links, and the "OPEN backend" org project board. Issue #1 records the plan's decisions and open questions; other issues cite them as "decisions Qn" or "Fn". Read the relevant ones before starting an issue.
 
 ## Stack (decided, see issue #1)
 
@@ -48,6 +48,13 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - A new action type is a new `AuditAction` value plus its generated migration. The issue that adds a feature records that feature's events, with a test.
 - `flush` (and so the teardown of a transactional test) fails once the audit table has a row. Tests that record events should run in a transaction that rolls back (the default `django_db` mark).
 - `actor_user` and `target_content_type` use `PROTECT`: an Account that has acted cannot be hard-deleted (deactivate it instead), and a content type an event points at cannot be removed. Plan account deletion around this.
+
+## Public identifiers
+
+- A model whose records have a public identity (Player, Club, Event, Organizer, Match) inherits `apps.public_ids.models.PublicCodeModel` and sets `public_code_type`. The system check `public_ids.E001` reports a concrete subclass without one. ADR 0008 records the scheme.
+- Codes are created only by `save()` (or `objects.create()`), which issues the code, records it in `IssuedCode`, and refuses to change it later. `bulk_create`, `QuerySet.update`, and raw SQL skip all of this.
+- Never expose or accept a row id in the API. A path parameter that names a record is `Annotated[str, PublicCodePath(CodeType.X)]`, and the view looks the record up with `get_by_public_code()`. A malformed code returns the same 404 as an unknown one. A test fails on any integer `id`, `pk`, or `*_id` in the OpenAPI document.
+- To read a code from other input (such as a CSV column), use `apps.public_ids.codes.normalize()`, then look up the canonical form.
 
 ## API
 
