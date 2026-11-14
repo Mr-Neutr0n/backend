@@ -13,7 +13,7 @@ A registered OPEN login. An Account creates its own Player, and has at most one.
 _Avoid_: profile (a profile is the view of a Player that others see behind authentication).
 
 **Display Name**:
-The name a Player shows to others. Visible to every signed-in Account and to Partners, except for players aged 13 to 17 (ADR 0009).
+The name a Player shows to others. As ADR 0002 sets out, once Ratings are published, the Display Name of a Player whose Account is active is visible to every signed-in Account. Partners see it too, except for players aged 13 to 17 (ADR 0009).
 _Avoid_: username, nickname.
 
 **Legal Name**:

@@ -24,11 +24,11 @@ ADR 0002 already decided two things. There are no unclaimed Player records: ever
 
 Only the player sets these, on their own Player. No Organizer, Partner, CSV upload, or moderator sets them. A moderator may only remove them (#114, #116).
 
-- **Display name.** Required. Shown to every signed-in Account and to Partners, except for players aged 13 to 17 (below). Not encrypted: it is public within OPEN.
+- **Display name.** Required. Visible as ADR 0002 sets out: once Ratings are published, the display name of a Player whose Account is active is visible to every signed-in Account, players aged 13 to 17 included. Partners see it too, except for players aged 13 to 17 (below). Not encrypted: it is public within OPEN.
 - **Legal name.** Optional. The player adds it when an identity check or Organizer verification needs it. Seen by the player, and by staff whose role needs it, with an Audit Event each time (#115). Encrypted at the field level (#115). Never returned by any API except to the player themselves (their own profile and data export, #39).
 - **Birth year and birth month.** Required to create a Player. Never the day. Seen by the player, and by staff whose role needs it, with an Audit Event (#115). Encrypted (#115). Never shown to others and never returned to Partners. Others see an Age Group instead (below).
-- **Gender division.** Men's, women's, or empty. Optional. Collected only for gender divisions and the gender-specific Rating Formats (`doubles_men`, `doubles_women`, and `mixed_doubles`). There is no raw gender field. Who may enter which division is a governance and event rule, not a backend rule. Encrypted (#115). Not shown as a profile field. Shown only where a division needs it, such as an event entry or one of those Rating Formats.
-- **City and region.** Optional. No street address, postcode, or exact location. A profile detail under the player's privacy settings (#19). Not encrypted.
+- **Gender division.** Men's, women's, or empty. Optional. Used for the men's and women's doubles Rating Formats (`doubles_men`, `doubles_women`) and for mixed doubles eligibility (`mixed_doubles`). There is no raw gender field. Who may enter which division is a governance and event rule, not a backend rule. A Rating in `doubles_men` or `doubles_women`, shown under ADR 0002, reveals the division. This is accepted. The field itself is encrypted (#115) and is not shown as a profile field.
+- **City and region.** Optional. It helps signed-in players tell apart players with the same display name, and find players near them. No street address, postcode, or exact location. A profile detail under the player's privacy settings (#19). Not encrypted.
 
 ### Age
 
@@ -37,7 +37,8 @@ Only the player sets these, on their own Player. No Organizer, Partner, CSV uplo
 
 ### Players must be 13 or older
 
-- Signup asks for birth year and month first, on a neutral screen that does not hint at the limit. It refuses anyone under 13 by the end-of-month rule and keeps nothing from the attempt (#114).
+- Every path that creates a Player applies the 13-and-older rule by the end-of-month rule. It refuses anyone under 13 and keeps nothing from the attempt (#114).
+- Signup asks for birth year and month first, on a neutral screen that does not hint at the limit. The age the signup screen collects is the one stored on the Player. #114 decides how it carries over.
 - Under-13 players are out of scope. US COPPA would require verifiable parental consent, separate consent for partner sharing, parent review and deletion rights, and legal review. The email-only consent method does not apply, since OPEN shows ratings to every signed-in Account and shares them with Partners.
 - Parent-managed child profiles may come in a later milestone, with legal counsel, through a new ADR.
 - Organizer CSV uploads carry the Organizer's confirmation that every player is 13 or older (#71).
@@ -48,16 +49,25 @@ Only the player sets these, on their own Player. No Organizer, Partner, CSV uplo
 - Their display name and current Ratings stay visible to signed-in Accounts (ADR 0002).
 - Their other profile details (city and region, match history, rating history, stats, home club) start at the most restrictive privacy setting #19 offers. The player can widen them.
 - They are left out of all partner sharing until they turn 18. Partner API responses, batch lookups, webhooks, and Log in with OPEN authorizations never carry their data (#32, #75, #83, #85).
+- Matches a Partner submits that name them still count. Only the response withholds their identity and Rating (#32).
 - At 18 (by the end-of-month rule) their privacy settings stay as they are. They only become eligible for partner sharing.
 
 ### Unknown age
 
-A Player cannot be created without a birth year and month, so no Player has an unknown age. An Account with no Player (for example a staff Account made with `createsuperuser`) holds no age and no Player data. ADR 0002 removed unclaimed players, so unknown ages from organizer uploads never arise.
+- A live Player always has a birth year and month. A Player cannot be created without them.
+- An Account with no Player (for example a staff Account made with `createsuperuser`) holds no age and no Player data.
+- ADR 0002 removed unclaimed players, so unknown ages from organizer uploads never arise.
+- A Player loses its birth year and month only by removal: when its Account is deleted (#116), or when a moderator removes an under-13 player's personal data (#114). Such a Player is excluded from all partner sharing, permanently.
+- When #114 or #116 removes a required field (display name, birth year and month), that issue decides how the Player is shown.
 
 ### Account data
 
 - **Email address.** The login (ADR 0003). Seen by the player, and by staff whose role needs it. Never returned by any API except to the Account itself. Not encrypted, because login lookups and the case-insensitive unique constraint compare it (ADR 0003). Protected by access control, and by the rule that it never appears in logs or error reports (#65, #66).
 - **Password.** Only Django's salted hash is stored.
+
+### Sensitive personal data fields
+
+The sensitive personal data fields are the email address, legal name, birth year and month, gender division, and city and region. Rules in this record that name this set apply only to it. All personal data, sensitive or not, is listed in the inventory. Audit Events may record the values of other personal data, such as Ratings, Matches, permissions, and privacy settings (ADR 0007).
 
 ### What OPEN does not collect
 
@@ -73,33 +83,33 @@ A Player cannot be created without a birth year and month, so no Player has an u
 - Celery task arguments and return values (`CLAUDE.md`, Settings).
 - API error messages (`CLAUDE.md`, API).
 - Fixtures, seed data, and factories, beyond made-up Faker data (hard rule 1).
-- Audit Event `before`, `after`, and `reason` values. An Audit Event about a personal data field records the field's name, never its old or new value.
-- Partner APIs, webhooks, OpenAPI examples, and the seed command never include legal name, birth year, or birth month (#115).
+- Audit Event `before`, `after`, and `reason` values, for the sensitive personal data fields. An Audit Event about a sensitive personal data field records the field's name, never its old or new value.
+- Partner APIs, webhooks, and OpenAPI examples never include legal name, birth year, or birth month (#115). The seed command (#41) sets only made-up values for them.
 
 ### Retention
 
 Personal data stays while the Account exists. There is no automatic deletion of active or inactive Accounts.
 
-- A refused under-13 signup keeps nothing.
+- A refused under-13 attempt to create a Player keeps nothing.
 - Deleting an Account removes its personal data from the live database at once (#116). The Player and its Matches stay in the Ledger with the personal data removed (ADR 0002, hard rule 3).
 - A player found to be under 13: a moderator removes their personal data the same way (#114).
 - Backups age deleted personal data out within 30 days (#67).
 - Logs and error reports hold no personal data (#65, #66) and are kept 30 days.
-- Audit Events record which personal data field changed, never its value, so they are kept indefinitely (they are append-only, ADR 0007).
-- Expired sessions are removed by a scheduled task (#116).
+- Audit Events are kept indefinitely (they are append-only, ADR 0007). They never hold the value of a sensitive personal data field.
+- Expired sessions are removed by a scheduled task (#116). Deleting an Account also deletes its sessions (#116).
 - A data export file (#39) is deleted when its download link expires.
 
 ## Consequences
 
-- #19 adds the Player fields above and no others. It drops nothing beyond what ADR 0002 dropped. Its privacy settings need a most-restrictive level for players aged 13 to 17.
+- #19 adds the Player fields above, its privacy settings, and its OPEN Code, and no other personal data field. It drops nothing beyond what ADR 0002 dropped. `Player.__str__` must return the display name or OPEN Code, never the legal name, because Django's admin log stores it in `object_repr`. Its privacy settings need a most-restrictive level for players aged 13 to 17.
 - #114 builds the age screen, the 13-and-older refusal, the end-of-month rule, and the removal of an under-13 player's personal data. Its task "Players aged 13 to 17 start with profile visibility set to private" means the other profile details only (ADR 0002).
 - #115 encrypts legal name, birth year and month, and gender division ("gender" in #115 means the gender division). It audits staff access, and adds the check that every personal data field is in the inventory.
 - #116 deletes personal data on Account deletion and runs the session cleanup. It has no unclaimed records to age out (ADR 0002) and no inactivity deletion to run. `AuditEvent.actor_user` uses `PROTECT` (ADR 0007), so a deleted Account's row is kept with its personal data cleared, not hard-deleted. #116 decides the mechanics.
 - #67 sets backup retention so deleted personal data is gone from backups within 30 days.
 - #39's export includes every field in the inventory that belongs to the player.
-- #49's external rating reference and #82's platform player IDs are personal data. They go in the inventory when they land.
+- Every planned personal data field goes in the inventory when it lands.
 - Django's admin log (`django.contrib.admin.models.LogEntry`) stores an object's string form in `object_repr`. An Account's string form is its email address (`User.__str__` returns `self.email`). #116 must clear it on deletion.
-- Partner integrations cannot rate or look up players aged 13 to 17 until they turn 18.
+- Partner integrations cannot look up or receive data about players aged 13 to 17 until they turn 18. Matches a Partner submits that name them still count (#32).
 - The age bands are not fixed here.
 
 ## Alternatives considered
@@ -108,6 +118,6 @@ Personal data stays while the Account exists. There is no automatic deletion of 
 - **Birth year only.** Up to a year of error at the 13 and 18 limits.
 - **Under-13 players with parental consent now.** COPPA consent, partner-sharing consent, and legal review are out of reach at launch.
 - **A raw gender field plus a derived division.** More sensitive data to protect, for no feature need.
-- **Treating an unknown age as 13 to 17, or as an adult.** Rejected in favor of requiring birth year and month before a Player exists, which leaves no unknown ages.
+- **Treating an unknown age as 13 to 17, or as an adult.** Rejected in favor of requiring birth year and month before a Player exists, so a live Player never has an unknown age. A Player whose birth year and month were removed is excluded from all partner sharing, the most protected answer.
 - **Deleting inactive Accounts after a fixed period.** More machinery, and a risk of surprising players. A player can delete their Account at any time.
 - **Encrypting the email address.** Login lookups and the case-insensitive unique constraint compare it (ADR 0003).
