@@ -5,12 +5,16 @@ The shared vocabulary for this repository. Use these terms in models, endpoints,
 ## People and accounts
 
 **Player**:
-A person who plays matches and has ratings. A Player record can exist and collect OPEN matches before that person registers. Engine: `Player`.
+A person who plays matches and has ratings. Every Player belongs to exactly one Account, which creates it. There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
 _Avoid_: user, member, athlete.
 
 **Account**:
-A registered OPEN login. An Account can claim an existing Player record ("linking"). Players and Accounts are separate so that results can be recorded for people who have not signed up. Engine: `Player.account_user_id`, `RatingEngine.link_account`. Backend: `accounts.User`, keyed on email.
+A registered OPEN login. An Account creates its own Player, and has at most one. The engine allows a Player with no Account, but the backend does not use that (ADR 0002). Engine: `Player.account_user_id`, `RatingEngine.link_account`. Backend: `accounts.User`, keyed on email.
 _Avoid_: profile (a profile is the public view of a Player).
+
+**Opt-out**:
+A pause a Player turns on and off. While opted out, the Player is hidden from public views, rankings, stats, partner APIs, and webhooks, and shows as "Private player" in other players' match history. Past Matches stay in the Ledger and keep counting for the other players. The Player's own Rating is still computed in Replays but never published. New Submissions that name the Player fail. The Player can still see and export their own data. Not a deletion (ADR 0002). Backend: `opted_out_at`.
+_Avoid_: deletion, deactivation.
 
 **Organizer**:
 A verified person or body that submits results on behalf of an event, club, league, or tournament. An Organizer submission counts as confirmed.
