@@ -18,7 +18,7 @@ The engine supports Player records with no Account (`Player.account_user_id` is 
 
 Unclaimed records bring hard problems. The person never agreed to have a record. Their age is unknown, so OPEN cannot tell whether they are a minor (#93). Someone else can claim the record falsely. Two records for one person must be merged, and the Ledger is append-only (hard rule 3), so a merge cannot rewrite past Matches.
 
-Opt-out must also fit the Ledger and the Replay. A Replay must give the same Ratings for every other player whether or not someone opts out.
+Opt-out must also fit the Ledger and the Replay. For the Matches already in the Ledger, a Replay must give the same Ratings for every other player whether or not someone opts out.
 
 ## Decision
 
@@ -40,15 +40,20 @@ Opt-out must also fit the Ledger and the Replay. A Replay must give the same Rat
 
 Opt-out is a pause, not a deletion. Deleting an Account and its personal data is #116. While a player is opted out:
 
-- Their public profile returns the same 404 as an unknown OPEN Code.
-- Other players' match history shows them as "Private player".
-- They are left out of rankings, stats, partner APIs (rating lookups and batch lookups), and webhooks (decision F9).
-- Their past Matches stay in the Ledger (hard rule 3) and keep counting for the other players in them. A Replay gives the same Ratings for everyone else.
-- Their own Rating is still computed in Replays, since the other players' math needs it. It is never published.
-- A new Submission that names them fails for that Match, with the same error as an unknown OPEN Code. The error does not reveal the opt-out. This applies to every submission path: Partner, bulk, CSV, Organizer, and self-submission.
+- Every lookup path answers for them exactly as for an unknown OPEN Code. This covers the public profile (the same 404), single and batch rating lookups, and any other partner read. A batch lookup reports them the same way it reports an unknown code.
+- Other players' match history shows them as "Private player". This is the same label used for players hidden by their privacy settings (#31, #56), so it does not single out an opt-out.
+- They are left out of rankings, stats, and webhooks (decision F9).
+- Their past Matches stay in the Ledger (hard rule 3) and keep counting for the other players in them. For those Matches, a Replay gives the same Ratings for everyone else.
+- Their own Rating is still computed in Replays, since the other players' math needs it. It is never published to others. They can still see it, and their export includes it.
+- A new Submission that names them fails for that Match. Every submission path must check this: Partner, bulk, CSV, Organizer, and self-submission. The error depends on how the Submission names them:
+  - By OPEN Code: the same error as an unknown OPEN Code.
+  - By a platform player ID resolved through a mapping (#82) or a link (#75): the same error as an unmapped ID.
+  - In their own self-submission: a plain refusal that says they are opted out. They already know.
+- A Submission that names them and has not entered the Ledger when they opt out also fails. This covers a Submission pending Confirmation and a Flagged Match awaiting review. It never enters the Ledger, even if it is confirmed or approved later.
+- While opted out, they cannot confirm or dispute Matches.
 - They can still see and export their own data (the charter).
 - They can opt back in at any time. Opting back in restores visibility and lets new Matches count. Matches refused while they were opted out are not added later.
-- Opting out and opting back in are each recorded with a timestamp (`opted_out_at`, #19) and an Audit Event.
+- `opted_out_at` (#19) holds only the start of the current opt-out. Opting back in clears it. Audit Events record both the opt-out and the opt-in, each with its time.
 
 ### Personal data
 
@@ -58,9 +63,12 @@ No unclaimed players exist, so there is no minimum data set for one. Personal da
 
 - A league needs every player to sign up and create a Player before its results are uploaded. #124 already says this.
 - #19's criterion "A player can exist without a user (unclaimed)" no longer applies. The link from Player to Account becomes required and one-to-one.
+- #19's "claimed status" task is dropped. There is no claimed status field.
 - #93's question about unknown ages for unclaimed players does not arise.
+- #93's "Unclaimed players" rule becomes: only the player sets birth year, birth month, gender, and legal name, on their own Player.
 - #116's retention for unclaimed records has nothing to act on.
-- The opt-out check must run on every read path: profile, match history, rankings, stats, partner APIs, webhooks, and the rating card. It must also run on every submission path. A missed path leaks the player or records a Match they refused.
+- The opt-out check must run on every read path: profile, match history, rankings, stats, partner APIs, webhooks, and the rating card. It must also run on every submission path, and on every Submission still waiting for Confirmation or review. A missed path leaks the player or records a Match they refused.
+- A Partner that knows its mapping was confirmed can infer, from the unmapped-ID error, that the player opted out or the mapping was removed. This signal is accepted.
 - A Match refused during an opt-out may leave a league result unrecorded for the other players in it. That is the cost of a real pause.
 - Adding unclaimed records later needs a new record that supersedes this one in part. It must first decide how records are created and matched, how a person claims one, how false claims and merges are handled, and the minimum data stored.
 

@@ -13,7 +13,7 @@ A registered OPEN login. An Account creates its own Player, and has at most one.
 _Avoid_: profile (a profile is the public view of a Player).
 
 **Opt-out**:
-A pause a Player turns on and off. While opted out, the Player is hidden from public views, rankings, stats, partner APIs, and webhooks, and shows as "Private player" in other players' match history. Past Matches stay in the Ledger and keep counting for the other players. The Player's own Rating is still computed in Replays but never published. New Submissions that name the Player fail. The Player can still see and export their own data. Not a deletion (ADR 0002). Backend: `opted_out_at`.
+A pause a Player turns on and off. While opted out, every lookup (profile, rating lookups, partner reads) answers for the Player exactly as for an unknown OPEN Code. The Player is left out of rankings, stats, webhooks, and the rating card, and shows as "Private player" in other players' match history. Past Matches stay in the Ledger and keep counting for the other players. The Player's own Rating is still computed in Replays but never published to others. New Submissions that name the Player fail, and so does any Submission not yet in the Ledger. The Player cannot confirm or dispute Matches. The Player can still see and export their own data, Rating included. Not a deletion (ADR 0002). Backend: `opted_out_at`.
 _Avoid_: deletion, deactivation.
 
 **Organizer**:
@@ -104,7 +104,7 @@ Running the engine on real results without publishing or relying on its Ratings.
 ## Records
 
 **Audit Event**:
-One recorded sensitive action: who did it (an Account, or nobody), what it changed (the target), the values before and after, and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
+One recorded sensitive action: who did it (an Account, or nobody), what it changed (the target), the values before and after, and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, privacy changes and opt-out, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
 _Avoid_: log entry (Django's admin `LogEntry` is a different thing), history.
 
 ## Governance terms

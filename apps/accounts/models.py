@@ -81,8 +81,8 @@ class User(AbstractUser):
     """An OPEN Account: a registered login, identified by email address.
 
     `User` holds login data only. Player profile data (name, ratings,
-    matches, external IDs) does not live here; it lives on Player, which
-    an Account can claim by linking.
+    matches, external IDs) does not live here; it lives on Player. Each
+    Account creates its own Player (ADR 0002).
     """
 
     # Removing the inherited fields: the stubs type them as str.
