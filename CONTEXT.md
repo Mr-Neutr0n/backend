@@ -5,12 +5,28 @@ The shared vocabulary for this repository. Use these terms in models, endpoints,
 ## People and accounts
 
 **Player**:
-A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. Once Ratings are published, the display name and current Ratings of a Player whose Account is active are always visible to every signed-in Account, and the Player cannot hide them. Authenticated partner applications see them too, except for players aged 13 to 17 (#93). There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
+A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. Once Ratings are published, the display name and current Ratings of a Player whose Account is active are always visible to every signed-in Account, and the Player cannot hide them. Authenticated partner applications see them too, except for players aged 13 to 17 (ADR 0009). There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
 _Avoid_: user, member, athlete.
 
 **Account**:
 A registered OPEN login. An Account creates its own Player, and has at most one. The engine allows a Player with no Account, but the backend never creates one. #116 decides what a deleted Account leaves behind (ADR 0002). Engine: `Player.account_user_id`, `RatingEngine.link_account`. Backend: `accounts.User`, keyed on email.
 _Avoid_: profile (a profile is the view of a Player that others see behind authentication).
+
+**Display Name**:
+The name a Player shows to others. Visible to every signed-in Account and to Partners, except for players aged 13 to 17 (ADR 0009).
+_Avoid_: username, nickname.
+
+**Legal Name**:
+A Player's full legal name, private, used only for identity checks and Organizer verification. Encrypted, and never returned to Partners (ADR 0009).
+_Avoid_: real name.
+
+**Age Group**:
+A band derived from a Player's birth year and month, shown in their place. OPEN stores birth year and month, never the day, and applies age limits as if the player were born on the last day of the month (ADR 0009).
+_Avoid_: age, birthdate.
+
+**Gender Division**:
+The gender division a Player enters for divisions and gender-specific Rating Formats: men's, women's, or none. OPEN stores no other gender data (ADR 0009).
+_Avoid_: gender, sex.
 
 **Organizer**:
 A verified person or body that submits results on behalf of an event, club, league, or tournament. An Organizer submission counts as confirmed.

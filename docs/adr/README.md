@@ -56,3 +56,4 @@ Add each record here when it merges.
 - [0006. Celery queues and broker](0006-celery-queues-and-broker.md) (issue #9)
 - [0007. An append-only audit log enforced in the database](0007-append-only-audit-log.md) (issue #17)
 - [0008. Public identifiers: OPEN Codes](0008-public-identifiers.md) (issue #92)
+- [0009. Personal data: what OPEN collects and how it is protected](0009-personal-data.md) (issue #93)
