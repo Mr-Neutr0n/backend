@@ -382,3 +382,23 @@ def test_issued_code_bulk_create_inserts(issued: IssuedCode) -> None:
 def test_issued_code_duplicate_insert_fails(issued: IssuedCode) -> None:
     with pytest.raises(IntegrityError), transaction.atomic():
         IssuedCode.objects.create(code=issued.code)
+
+
+def test_a_caller_force_insert_tuple_is_kept(thing_model: Thing) -> None:
+    thing = thing_model(label="made-up one")
+
+    thing.save(force_insert=(thing_model,))
+
+    assert (
+        thing_model._default_manager.get(pk=thing.pk).public_code == thing.public_code
+    )
+
+
+def test_a_caller_force_insert_tuple_must_name_a_base(thing_model: Thing) -> None:
+    thing = thing_model(label="made-up one")
+
+    with pytest.raises(TypeError):
+        thing.save(force_insert=(IssuedCode,))
+
+    assert thing.public_code is None
+    assert thing_model._default_manager.count() == 0
