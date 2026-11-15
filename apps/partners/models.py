@@ -8,8 +8,8 @@ security-sensitive (CLAUDE.md, hard rule 8): ``approved_at`` and
 approval service #29 adds.
 """
 
-from collections.abc import Collection, Iterable
-from typing import Any, ClassVar, NoReturn, Self
+from collections.abc import Collection
+from typing import Any, ClassVar, NoReturn
 
 from django.conf import settings
 from django.contrib.auth.hashers import identify_hasher
@@ -57,10 +57,6 @@ class PartnerApplication(AbstractApplication):
     )
     is_sandbox = models.BooleanField(default=True)
 
-    # Not a field: the client_secret value loaded from the database (or
-    # last saved), so only a new or changed value is checked as raw.
-    _stored_client_secret: str | None = None
-
     class Meta(AbstractApplication.Meta):
         swappable = "OAUTH2_PROVIDER_APPLICATION_MODEL"
         constraints: ClassVar[list[models.BaseConstraint]] = [
@@ -97,58 +93,39 @@ class PartnerApplication(AbstractApplication):
         """
         raise AttributeError("A partner application has no page.")
 
-    @classmethod
-    def from_db(
-        cls,
-        db: str | None,
-        field_names: Collection[str],
-        values: Collection[Any],
-        **kwargs: Any,
-    ) -> Self:
-        # **kwargs: the stubs add Django 6's fetch_mode, which 5.2 lacks.
-        instance = super().from_db(db, field_names, values, **kwargs)
-        # Absent when the field is deferred.
-        instance._stored_client_secret = instance.__dict__.get("client_secret")
-        return instance
-
-    def refresh_from_db(
-        self,
-        using: str | None = None,
-        fields: Iterable[str] | None = None,
-        from_queryset: models.QuerySet[Self] | None = None,
-    ) -> None:
-        """Reload, and record a reloaded client secret as the stored one.
-
-        Reading a deferred field also comes through here.
-        """
-        names = None if fields is None else list(fields)
-        super().refresh_from_db(using=using, fields=names, from_queryset=from_queryset)
-        if (names is None or "client_secret" in names) and (
-            "client_secret" not in self.get_deferred_fields()
-        ):
-            self._stored_client_secret = self.client_secret
-
     def _raw_secret_error(self) -> str | None:
-        """The reason a new or changed client secret is refused, or None.
+        """The reason the client secret cannot be saved, or None.
 
-        A raw secret is hashed on save, so it must not be blank (the hash
-        of "" lets a client in with no secret) or look like a hash
-        (``ClientSecretField`` would store it as is, and DOT would then
-        compare the plaintext). The stored value, unchanged, is a hash and
-        is not checked. Neither is a deferred one.
+        Stateless, so no stale record of a loaded value can let a raw
+        secret through. A deferred secret is not checked.
+
+        - Not text, blank, or whitespace only: refused. Its hash would let
+          a client in with no secret.
+        - Recognized by ``identify_hasher``: accepted only when that
+          hasher decodes it, a well-formed stored hash. Anything else
+          (``pbkdf2_sha256$x``, or an argon2 or bcrypt value without its
+          library) is refused, since ``ClientSecretField`` would store it
+          as is and DOT would then compare the plaintext.
+        - Otherwise a raw secret, which ``ClientSecretField`` hashes.
+
+        A well-formed hash given as a new secret is stored as is. That is
+        not a way in: DOT's ``check_password`` then needs the secret it
+        was made from.
         """
         if "client_secret" in self.get_deferred_fields():
             return None
         secret = self.client_secret
-        if not self._state.adding and secret == self._stored_client_secret:
-            return None
         if not isinstance(secret, str) or not secret.strip():
             return _BLANK_SECRET
         try:
-            identify_hasher(secret)
+            hasher = identify_hasher(secret)
         except ValueError:
             return None
-        return _HASH_SHAPED_SECRET
+        try:
+            hasher.decode(secret)
+        except Exception:
+            return _HASH_SHAPED_SECRET
+        return None
 
     def clean_fields(self, exclude: Collection[str] | None = None) -> None:
         skip = set(exclude or ())
@@ -171,13 +148,11 @@ class PartnerApplication(AbstractApplication):
         except ``approved_at`` and ``approved_by``, so an instance loaded
         before an approval change cannot write the old status back. A new
         application must start unapproved, so a copy of an approved one is
-        refused before any write. A copy (``pk = None``,
-        ``_state.adding = True``) needs a new raw secret, since the loaded
-        hash is refused as hash-shaped.
+        refused before any write.
 
-        A new or changed client secret that is blank or looks like a
-        password hash is refused before any write (see
-        ``_raw_secret_error``). ``QuerySet.update``, ``bulk_create``,
+        A save that writes ``client_secret`` refuses, before any write, a
+        secret that is blank or looks like a password hash but is not a
+        well-formed one (see ``_raw_secret_error``). ``QuerySet.update``, ``bulk_create``,
         ``bulk_update``, ``loaddata``, and raw SQL skip that check; the
         database still refuses a blank secret.
 
@@ -213,12 +188,6 @@ class PartnerApplication(AbstractApplication):
                 and field.name not in APPROVAL_FIELDS
             ]
         super().save(*args, **kwargs)
-        # Only a secret this save wrote was checked and hashed (pre_save
-        # replaced a raw one). One left out of update_fields was neither,
-        # so it must not count as the stored value.
-        written = update_fields is None or "client_secret" in update_fields
-        if written and "client_secret" not in self.get_deferred_fields():
-            self._stored_client_secret = self.client_secret
 
 
 class ClubApplicationGrant(models.Model):
