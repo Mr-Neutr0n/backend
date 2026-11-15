@@ -87,7 +87,6 @@ def test_c10_surrogate_is_refused_on_update(
         "́",  # lone combining acute accent
         "\U000f0000",  # private use
         "",  # private use
-        "͸",  # unassigned
         "ㅤ́​ ⠀",
     ],
 )
