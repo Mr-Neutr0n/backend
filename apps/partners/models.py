@@ -194,8 +194,11 @@ class PartnerApplication(AbstractApplication):
                 and field.name not in APPROVAL_FIELDS
             ]
         super().save(*args, **kwargs)
-        if "client_secret" not in self.get_deferred_fields():
-            # pre_save replaced a raw secret with its hash.
+        # Only a secret this save wrote was checked and hashed (pre_save
+        # replaced a raw one). One left out of update_fields was neither,
+        # so it must not count as the stored value.
+        written = update_fields is None or "client_secret" in update_fields
+        if written and "client_secret" not in self.get_deferred_fields():
             self._stored_client_secret = self.client_secret
 
 
