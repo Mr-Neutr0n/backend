@@ -37,16 +37,39 @@ def test_well_formed_hash_is_refused_on_create() -> None:
     assert PartnerApplication.objects.count() == 0
 
 
-def test_well_formed_hash_is_refused_as_a_rotation() -> None:
+def test_well_formed_hash_as_a_rotation_is_not_written() -> None:
     application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
     before = _stored(application.pk)
     loaded = PartnerApplication.objects.get(pk=application.pk)
 
     loaded.client_secret = make_password("made-up-other-secret")
+    loaded.save(update_fields=["client_secret"])
+
+    assert _stored(application.pk) == before
+
+
+def test_blank_rotation_is_refused() -> None:
+    application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
+    before = _stored(application.pk)
+    loaded = PartnerApplication.objects.get(pk=application.pk)
+
+    loaded.client_secret = ""
     with pytest.raises(ValueError, match="client secret"):
         loaded.save(update_fields=["client_secret"])
 
     assert _stored(application.pk) == before
+
+
+def test_raw_rotation_is_hashed_and_written(client: Client) -> None:
+    application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
+    loaded = PartnerApplication.objects.get(pk=application.pk)
+    new_secret = "made-up-rotated-secret-for-tests"
+
+    loaded.client_secret = new_secret
+    loaded.save(update_fields=["client_secret"])
+
+    assert check_password(new_secret, _stored(application.pk)) is True
+    assert _token(client, application.client_id, new_secret) == 200
 
 
 def test_hash_shaped_value_on_loaded_row_is_not_written() -> None:
