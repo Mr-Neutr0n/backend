@@ -170,10 +170,50 @@ class Player(PublicCodeModel):
             raise ValidationError(errors)
 
     def clean(self) -> None:
+        self._clean_rules(None)
+
+    def validate_changes(self, fields: Collection[str]) -> None:
+        """Like ``full_clean()``, with the content rules on ``fields`` only.
+
+        A profile change uses this, so a stored value that a later rule (or
+        newer Unicode data) refuses does not block an edit to another
+        field. Uniqueness and database constraints are still checked for
+        every field that passed.
+        """
+        changed = set(fields)
+        unchanged = [
+            field.name
+            for field in self._meta.concrete_fields
+            if field.name not in changed
+        ]
+        errors: dict[str, list[ValidationError]] = {}
+        try:
+            self.clean_fields(exclude=unchanged)
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        try:
+            self._clean_rules(changed)
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        try:
+            self.validate_unique(exclude=list(errors))
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        try:
+            self.validate_constraints(exclude=list(errors))
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        if errors:
+            raise ValidationError(errors)
+
+    def _clean_rules(self, fields: Collection[str] | None) -> None:
+        """The model-level rules, for ``fields`` only, or all when None."""
         errors: dict[str, str] = {}
-        if not _has_visible_character(self.display_name):
+        name_changed = fields is None or "display_name" in fields
+        if name_changed and not _has_visible_character(self.display_name):
             errors["display_name"] = "Enter a display name."
-        if self._birth_month_is_in_the_future():
+        birth_changed = fields is None or not set(BIRTH_FIELDS).isdisjoint(fields)
+        if birth_changed and self._birth_month_is_in_the_future():
             errors["birth_month"] = "The birth year and month cannot be in the future."
         if errors:
             raise ValidationError(errors)

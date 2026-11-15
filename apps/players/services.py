@@ -132,9 +132,10 @@ def update_profile(
         old = {name: getattr(locked, name) for name in PROFILE_FIELDS}
         for name, value in changes.items():
             setattr(locked, name, value)
-        locked.full_clean()
-        # Only fields named in changes: full_clean also normalizes the
-        # others in memory, and those must not be rewritten.
+        # The content rules run on the changed fields only, so a stored
+        # value a later rule refuses does not block this edit. Only fields
+        # named in changes are compared and saved.
+        locked.validate_changes(changes)
         changed = sorted(name for name in changes if getattr(locked, name) != old[name])
         if changed:
             locked.save(update_fields=changed)
