@@ -180,7 +180,11 @@ class PartnerApplication(AbstractApplication):
             reason = self._raw_secret_error()
             if reason is not None:
                 raise ValueError(f"The client secret is refused: {reason}")
-        if not self._state.adding and update_fields is None:
+        if self._state.adding and update_fields is None:
+            # A new instance given an existing pk would otherwise UPDATE
+            # that row, approval included. It fails on the pk instead.
+            kwargs.setdefault("force_insert", True)
+        elif update_fields is None:
             deferred = self.get_deferred_fields()
             kwargs["update_fields"] = [
                 field.name
