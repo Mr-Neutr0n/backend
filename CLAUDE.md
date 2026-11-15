@@ -43,7 +43,7 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 
 ## Audit log
 
-- Write an `AuditEvent` only through `apps.audit.services.record_event()`, inside the same `transaction.atomic()` as the change it records. Record a delete before calling `delete()`. Build `before` and `after` with `snapshot(instance, fields)`, which takes an explicit field list, so a password hash is never captured by accident. `record_event` redacts values under sensitive key names, but never put a secret, token, or recovery code in `before`, `after`, or `reason`.
+- Write an `AuditEvent` only through `apps.audit.services.record_event()`, inside the same `transaction.atomic()` as the change it records. Record a delete before calling `delete()`. Build `before` and `after` with `snapshot(instance, fields)`, which takes an explicit field list, so a password hash is never captured by accident. `record_event` redacts values under sensitive key names, but never put a secret, token, recovery code, or the value of an identifying personal data field (ADR 0009) in `before`, `after`, or `reason`.
 - Audit rows are append-only. In app code the ORM refuses every change or delete. A database trigger (migration `0002_append_only`) refuses `UPDATE`, `DELETE`, and `TRUNCATE` of a non-empty table. Inside a migration, a historical model gets no ORM guard, so only the trigger protects the rows. The trigger does not stop the table's owner or a database superuser, who can disable it. The runtime database role must not own the table: #103 must make sure of that (a comment there asks for it).
 - A new action type is a new `AuditAction` value plus its generated migration. The issue that adds a feature records that feature's events, with a test.
 - `flush` (and so the teardown of a transactional test) fails once the audit table has a row. Tests that record events should run in a transaction that rolls back (the default `django_db` mark).
@@ -55,6 +55,15 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - Codes are created only by `save()` (or `objects.create()`), which issues the code, records it in `IssuedCode`, and refuses to change it later. Fixtures (`loaddata`), `bulk_create`, `QuerySet.update`, and raw SQL skip all of this and must not set codes. To copy a record, set `public_code = None`, `pk = None`, and `_state.adding = True` before saving. Saving a deleted record raises.
 - Never expose or accept a row id in the API. A path parameter that names a record is `Annotated[str, PublicCodePath(CodeType.X)]`, and the view looks the record up with `get_by_public_code()`. `PublicCodePath` is for path parameters only, not body or response fields. A test fails on any numeric `id`, `pk`, `*_id`, `*Id`, or plural of these in the OpenAPI document, hidden operations included.
 - To read a code from other input (such as a CSV column), use `apps.public_ids.codes.normalize()`, then look up the canonical form.
+
+## Personal data
+
+- ADR 0009 sets what OPEN collects. Every model field that holds personal data is listed in `docs/privacy/personal-data-inventory.md`. Add, change, or remove its entry in the same pull request as the field.
+- Never store a full birthdate (store birth year and month only), a raw gender, a street address, a phone number, or payment data.
+- Only the player sets their own display name, legal name, birth year and month, gender division, and city and region. Others may only remove them (#114, #116).
+- Every path that creates a Player refuses anyone under 13, and a new Player always has a birth year and month. Players aged 13 to 17 are left out of all partner sharing. A Player whose birth year and month were removed (#114, #116) is excluded from all partner sharing, permanently.
+- The identifying personal data fields are email, display name, legal name, birth year and month, gender division, city and region, External IDs (#49), and platform player IDs (#82). An Audit Event about one of them records the field's name, never its value. Account deletion is wider: it removes all personal data except what ADR 0009's Retention section keeps.
+- No model's `__str__` returns an identifying field, so the admin log's `object_repr` and admin messages never hold one (a Player's returns its OPEN Code). `accounts.User.__str__` returns the email, the known exception: #116 clears the admin log entries tied to a deleted Account.
 
 ## API
 
@@ -112,6 +121,7 @@ uv run pre-commit run --all-files
 - `CONTRIBUTING.md`: this repository's contribution workflow (pull requests, DCO, code style, tests, migrations, good first issues). It adds to the org guide.
 - `CONTEXT.md`: the domain language (Match, Ledger, Replay, Rating Format, Reliability, and so on). Read it before naming models, endpoints, or fields.
 - `docs/adr/`: architecture decision records. Check here before changing a decision, and add a record when you make one.
+- `docs/privacy/personal-data-inventory.md`: every personal data field, with purpose, visibility, retention, and encryption (ADR 0009).
 - GitHub issue #1: the backend plan's decisions (Q1 to Q16, F1 to F11) and checked package versions.
 - Organization-wide policy lives in the `openpickleball/.github` repository: charter, governance, roadmap, contributing guide, security policy, licensing. A local checkout may exist at `../OPEN-pickleball`.
 - The reference engine may be checked out at `../OPEN-engine`. Its module docstring in `src/open_engine/engine.py` lists production requirements the backend must meet.
