@@ -21,7 +21,7 @@ class AuditEventAdmin(admin.ModelAdmin[AuditEvent]):
     )
     list_filter = ("action", "target_content_type")
     search_fields = ("target_object_id",)
-    list_select_related = ("actor_user", "target_content_type")
+    list_select_related = ("actor_user", "actor_application", "target_content_type")
     date_hierarchy = "created_at"
     # No actions at all, so the bulk "delete selected" action is gone.
     actions = None
@@ -29,6 +29,7 @@ class AuditEventAdmin(admin.ModelAdmin[AuditEvent]):
         "created_at",
         "action",
         "actor_user",
+        "actor_application",
         "target_content_type",
         "target_object_id",
         "before",

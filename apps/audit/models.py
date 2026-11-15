@@ -102,6 +102,15 @@ class AuditEvent(models.Model):
         on_delete=models.PROTECT,
         related_name="+",
     )
+    # The Partner Application that acted, when one did. PROTECT, like
+    # actor_user: revoke an application that has acted, never delete it.
+    actor_application = models.ForeignKey(
+        settings.OAUTH2_PROVIDER_APPLICATION_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
     action = models.CharField(max_length=64, choices=AuditAction.choices, db_index=True)
     target_content_type = models.ForeignKey(
         ContentType, on_delete=models.PROTECT, related_name="+"

@@ -8,7 +8,7 @@ the change and its audit event commit together or not at all.
 import json
 import re
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import AnonymousUser
@@ -16,6 +16,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.db import models
 
 from apps.audit.models import AuditAction, AuditEvent
+
+if TYPE_CHECKING:
+    # The swapped OAuth Application model (OAUTH2_PROVIDER_APPLICATION_MODEL).
+    from apps.partners.models import PartnerApplication
 
 REDACTED = "[redacted]"
 
@@ -142,6 +146,7 @@ def record_event(
     action: AuditAction,
     target: models.Model,
     actor: AbstractBaseUser | AnonymousUser | None = None,
+    actor_application: "PartnerApplication | None" = None,
     before: Mapping[str, Any] | None = None,
     after: Mapping[str, Any] | None = None,
     reason: str = "",
@@ -156,7 +161,8 @@ def record_event(
     Account ``actor`` must be saved: loaded from or written to the database,
     with a primary key. To record a delete, call this before ``delete()``,
     which clears the instance's primary key. An anonymous or missing actor
-    is stored as no actor. Sensitive keys in ``before`` and ``after`` are
+    is stored as no actor. ``actor_application`` is the Partner
+    Application that acted, if any, and must be saved too. Sensitive keys in ``before`` and ``after`` are
     redacted (see ``_redact``).
     """
     if not isinstance(action, str) or action not in AuditAction.values:
@@ -169,10 +175,14 @@ def record_event(
         if not _is_saved(actor):
             raise ValueError("The actor must be saved before it is audited.")
         actor_id = actor.pk
+    if actor_application is not None and not _is_saved(actor_application):
+        raise ValueError("The actor application must be saved before it is audited.")
 
     return AuditEvent.objects.create(
         action=AuditAction(action),
         actor_user_id=actor_id,
+        # The instance, not its pk, so Django refuses any other model.
+        actor_application=actor_application,
         target_content_type=ContentType.objects.get_for_model(target),
         target_object_id=str(target.pk),
         before=None if before is None else _redact(before),
