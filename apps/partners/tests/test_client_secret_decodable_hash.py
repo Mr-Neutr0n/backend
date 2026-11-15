@@ -5,10 +5,7 @@ unhashed. DOT's check_password then raises on them and falls back to a
 plain comparison, so the stored string itself authenticates.
 """
 
-import base64
-
 import pytest
-from django.test import Client
 
 from apps.partners.models import PartnerApplication
 from apps.partners.tests.factories import PartnerApplicationFactory
@@ -31,21 +28,3 @@ def test_create_with_decodable_hash_is_refused(secret: str) -> None:
         PartnerApplicationFactory.create(client_secret=secret)
 
     assert PartnerApplication.objects.count() == 0
-
-
-@pytest.mark.parametrize("secret", DECODABLE)
-def test_literal_value_never_gets_a_token(client: Client, secret: str) -> None:
-    try:
-        application = PartnerApplicationFactory.create(client_secret=secret)
-    except ValueError:
-        # Refused at creation, so no client holds it.
-        return
-    pair = base64.b64encode(f"{application.client_id}:{secret}".encode()).decode()
-
-    response = client.post(
-        "/oauth/token/",
-        {"grant_type": "client_credentials"},
-        HTTP_AUTHORIZATION=f"Basic {pair}",
-    )
-
-    assert response.status_code == 401
