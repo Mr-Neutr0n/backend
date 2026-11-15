@@ -27,6 +27,17 @@ _HASH_SHAPED_SECRET = (
 )
 
 
+def _is_hash_shaped(value: object) -> bool:
+    """True when ``identify_hasher`` recognizes ``value`` as a hash."""
+    if not isinstance(value, str):
+        return False
+    try:
+        identify_hasher(value)
+    except ValueError:
+        return False
+    return True
+
+
 class PartnerApplication(AbstractApplication):
     """An OAuth client registered by a partner (CONTEXT.md, Partner).
 
@@ -93,44 +104,41 @@ class PartnerApplication(AbstractApplication):
         """
         raise AttributeError("A partner application has no page.")
 
-    def _raw_secret_error(self) -> str | None:
-        """The reason the client secret cannot be saved, or None.
+    def _keeps_stored_secret(self) -> bool:
+        """True when a full save leaves ``client_secret`` out.
 
-        Stateless, so no stale record of a loaded value can let a raw
-        secret through. A deferred secret is not checked.
-
-        - Not text, blank, or whitespace only: refused. Its hash would let
-          a client in with no secret.
-        - Recognized by ``identify_hasher``: accepted only when that
-          hasher decodes it, a well-formed stored hash. Anything else
-          (``pbkdf2_sha256$x``, or an argon2 or bcrypt value without its
-          library) is refused, since ``ClientSecretField`` would store it
-          as is and DOT would then compare the plaintext.
-        - Otherwise a raw secret, which ``ClientSecretField`` hashes.
-
-        A well-formed hash given as a new secret is stored as is. That is
-        not a way in: DOT's ``check_password`` then needs the secret it
-        was made from.
+        The stored secret is never rewritten. On an existing row a full
+        save skips it when it is deferred or when the value in memory is
+        hash-shaped: the loaded hash, or anything that looks like one. A
+        value that is not hash-shaped is a new raw secret and is written.
         """
+        if self._state.adding:
+            return False
         if "client_secret" in self.get_deferred_fields():
-            return None
+            return True
+        return _is_hash_shaped(self.client_secret)
+
+    def _raw_secret_error(self) -> str | None:
+        """The reason a client secret about to be written is refused.
+
+        A written secret must be raw, since ``ClientSecretField`` hashes
+        it: text that is not blank (its hash would let a client in with
+        no secret) and that ``identify_hasher`` does not recognize at all.
+        A hash-shaped value would be stored as is, and DOT, failing to
+        check it, would compare the plaintext. So a copy (``pk = None``,
+        ``_state.adding = True``) needs a new raw secret too.
+        """
         secret = self.client_secret
         if not isinstance(secret, str) or not secret.strip():
             return _BLANK_SECRET
-        try:
-            hasher = identify_hasher(secret)
-        except ValueError:
-            return None
-        try:
-            hasher.decode(secret)
-        except Exception:
+        if _is_hash_shaped(secret):
             return _HASH_SHAPED_SECRET
         return None
 
     def clean_fields(self, exclude: Collection[str] | None = None) -> None:
         skip = set(exclude or ())
         errors: dict[str, list[ValidationError]] = {}
-        if "client_secret" not in skip:
+        if "client_secret" not in skip and not self._keeps_stored_secret():
             reason = self._raw_secret_error()
             if reason is not None:
                 errors["client_secret"] = [ValidationError(reason)]
@@ -150,11 +158,14 @@ class PartnerApplication(AbstractApplication):
         application must start unapproved, so a copy of an approved one is
         refused before any write.
 
-        A save that writes ``client_secret`` refuses, before any write, a
-        secret that is blank or looks like a password hash but is not a
-        well-formed one (see ``_raw_secret_error``). ``QuerySet.update``, ``bulk_create``,
-        ``bulk_update``, ``loaddata``, and raw SQL skip that check; the
-        database still refuses a blank secret.
+        The stored client secret is never rewritten: a full save of an
+        existing row leaves it out when it is deferred or hash-shaped
+        (see ``_keeps_stored_secret``). Any other write of it (a new
+        application, a full save with a new value, an explicit
+        ``update_fields`` naming it) must be a raw secret, or is refused
+        before any write (see ``_raw_secret_error``). ``QuerySet.update``,
+        ``bulk_create``, ``bulk_update``, ``loaddata``, and raw SQL skip
+        that check; the database still refuses a blank secret.
 
         An explicit ``update_fields`` naming either approval field writes
         it with no actor check and no Audit Event, as do
@@ -170,7 +181,9 @@ class PartnerApplication(AbstractApplication):
                 "A new partner application starts unapproved: approve it "
                 "through the approval service."
             )
-        if update_fields is None or "client_secret" in update_fields:
+        keep_secret = update_fields is None and self._keeps_stored_secret()
+        writes_secret = update_fields is None or "client_secret" in update_fields
+        if writes_secret and not keep_secret:
             reason = self._raw_secret_error()
             if reason is not None:
                 raise ValueError(f"The client secret is refused: {reason}")
@@ -186,6 +199,7 @@ class PartnerApplication(AbstractApplication):
                 if not field.primary_key
                 and field.attname not in deferred
                 and field.name not in APPROVAL_FIELDS
+                and not (keep_secret and field.name == "client_secret")
             ]
         super().save(*args, **kwargs)
 
