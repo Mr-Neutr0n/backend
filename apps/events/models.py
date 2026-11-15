@@ -36,6 +36,9 @@ _DATE_MESSAGE = "Enter a valid date in YYYY-MM-DD format."
 _DATE_MESSAGES = {"invalid": _DATE_MESSAGE, "invalid_date": _DATE_MESSAGE}
 _NUMBER_MESSAGES = {"invalid": "Enter a number."}
 _DATES_ORDER = "The end date cannot be before the start date."
+# Django's default names the submitted row id.
+_ORGANIZER_MESSAGES = {"invalid": "Choose an existing organizer."}
+_CLUB_MESSAGES = {"invalid": "Choose an existing club."}
 
 
 class EventKind(models.TextChoices):
@@ -62,7 +65,10 @@ class Event(_CleanedTextModel):
         max_length=20, choices=EventKind, error_messages=CHOICE_MESSAGES
     )
     organizer = models.ForeignKey(
-        "clubs.Organizer", on_delete=models.PROTECT, related_name="events"
+        "clubs.Organizer",
+        on_delete=models.PROTECT,
+        related_name="events",
+        error_messages=_ORGANIZER_MESSAGES,
     )
     club = models.ForeignKey(
         "clubs.Club",
@@ -70,6 +76,7 @@ class Event(_CleanedTextModel):
         blank=True,
         on_delete=models.PROTECT,
         related_name="events",
+        error_messages=_CLUB_MESSAGES,
     )
     start_date = models.DateField(error_messages=_DATE_MESSAGES)
     end_date = models.DateField(error_messages=_DATE_MESSAGES)
