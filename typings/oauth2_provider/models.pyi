@@ -1,5 +1,6 @@
-# Only AbstractApplication, so the django-stubs plugin sees the swapped
-# Application model (partners.PartnerApplication) as a model.
+# AbstractApplication, so the django-stubs plugin sees the swapped
+# Application model (partners.PartnerApplication) as a model, and the
+# model getters OPEN calls.
 import datetime as dt
 from typing import Any, ClassVar
 
