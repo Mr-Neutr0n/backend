@@ -177,8 +177,9 @@ class Player(PublicCodeModel):
 
         A profile change uses this, so a stored value that a later rule (or
         newer Unicode data) refuses does not block an edit to another
-        field. Uniqueness and database constraints are still checked for
-        every field that passed.
+        field. Fields not in ``fields`` get no field or content checks.
+        Uniqueness and database constraints still run on the whole record,
+        skipping only fields that failed the checks above.
         """
         changed = set(fields)
         unchanged = [
@@ -225,6 +226,20 @@ class Player(PublicCodeModel):
             return False
         today = timezone.localdate()
         return (year, month) > (today.year, today.month)
+
+
+def normalize_input(name: str, value: object) -> object:
+    """``value`` for field ``name`` after the normalization validation applies.
+
+    None becomes "" for an optional text field, and text fields are
+    stripped. A profile change compares the result with the stored value
+    to tell whether a submitted field changed.
+    """
+    if value is None and name in OPTIONAL_TEXT_FIELDS:
+        return ""
+    if name in TEXT_FIELDS and isinstance(value, str):
+        return value.strip()
+    return value
 
 
 def _is_int(value: object) -> bool:

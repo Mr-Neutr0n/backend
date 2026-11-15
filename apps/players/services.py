@@ -17,7 +17,7 @@ from django.db import transaction
 
 from apps.audit.models import AuditAction
 from apps.audit.services import record_event, snapshot
-from apps.players.models import Player, PlayerPrivacy
+from apps.players.models import Player, PlayerPrivacy, normalize_input
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import _User
@@ -130,13 +130,22 @@ def update_profile(
     with transaction.atomic():
         locked = _lock_own_player(player, actor)
         old = {name: getattr(locked, name) for name in PROFILE_FIELDS}
-        for name, value in changes.items():
+        # A submitted value equal to the stored one after normalization is
+        # unchanged: not validated, saved, or listed. So a client that
+        # resends the whole profile is not blocked by a stored value a later
+        # rule refuses, and an equal value of another type (1990.0) is
+        # never written.
+        submitted = {
+            name: value
+            for name, value in changes.items()
+            if normalize_input(name, value) != old[name]
+        }
+        for name, value in submitted.items():
             setattr(locked, name, value)
-        # The content rules run on the changed fields only, so a stored
-        # value a later rule refuses does not block this edit. Only fields
-        # named in changes are compared and saved.
-        locked.validate_changes(changes)
-        changed = sorted(name for name in changes if getattr(locked, name) != old[name])
+        locked.validate_changes(submitted)
+        changed = sorted(
+            name for name in submitted if getattr(locked, name) != old[name]
+        )
         if changed:
             locked.save(update_fields=changed)
             # Names only: these are identifying fields (ADR 0009).
