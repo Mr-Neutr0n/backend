@@ -7,6 +7,12 @@ references the old one. #26 adds the service that makes those changes, with
 its Audit Events. Until then nothing in the backend changes a Match after
 it is created.
 
+Games and participants use ``PROTECT``, so the ORM refuses to delete a Match
+that has either. That is not a full guard: a Match with neither can still be
+deleted, ``QuerySet.update`` and raw SQL can still change rows, and nothing
+yet stops an edit through ``save()``. #26 owes the full delete and edit
+guard.
+
 These models enforce only what a database constraint can: the allowed
 values of each choice, one submitter, a ``played_at`` that agrees with its
 local date, external IDs unique per Partner Application, at most
@@ -391,7 +397,7 @@ class MatchParticipant(_LinkMessagesModel):
 
     match = models.ForeignKey(
         Match,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="participants",
         error_messages=_MATCH_MESSAGES,
     )
@@ -426,7 +432,7 @@ class Game(_LinkMessagesModel):
 
     match = models.ForeignKey(
         Match,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="games",
         error_messages=_MATCH_MESSAGES,
     )
