@@ -1,0 +1,403 @@
+"""Matches: the games two teams played, who played them, and who sent them.
+
+A Match is one entry in the match ledger (CONTEXT.md, Match and Ledger).
+The ledger is append-only (CLAUDE.md, hard rule 3): a counted match is
+never edited in place or deleted. A correction is a new record that
+references the old one. #26 adds the service that makes those changes, with
+its Audit Events. Until then nothing in the backend changes a Match after
+it is created.
+
+These models enforce only what a database constraint can: the allowed
+values of each choice, one submitter, a ``played_at`` that agrees with its
+local date, external IDs unique per Partner Application, at most
+``MAX_GAMES`` games, and no negative scores. Score validation (win by 2,
+team size per format, games that decide the match) is #24, duplicate
+detection is #25, and confirmation and status changes are #26.
+
+The choice values equal the engine's values (``open_engine``), so #44 can
+map a Match to the engine's types without a lookup table. The match type is
+not stored: it comes from the Event's kind, or is self-reported when there
+is no Event (decision F1 in #1).
+"""
+
+import datetime
+from datetime import UTC, timedelta
+from typing import ClassVar
+
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models
+from django.db.models import (
+    DateField,
+    DateTimeField,
+    DurationField,
+    ExpressionWrapper,
+    F,
+    Func,
+    Q,
+    Value,
+)
+from django.db.models.functions import Cast
+
+from apps.clubs.models import _CleanedTextModel
+from apps.events.models import CHOICE_MESSAGES
+from apps.public_ids.codes import CodeType
+
+# Shared limits, defined once so score validation (#24) imports them.
+MAX_GAMES = 5
+MIN_UTC_OFFSET_MINUTES = -720
+MAX_UTC_OFFSET_MINUTES = 840
+
+# Messages never include the submitted value (CLAUDE.md, API). Django's
+# defaults for these keys do.
+_NUMBER_MESSAGES = {"invalid": "Enter a whole number."}
+_INTEGER_CHOICE_MESSAGES = {**CHOICE_MESSAGES, **_NUMBER_MESSAGES}
+_DATE_MESSAGE = "Enter a valid date in YYYY-MM-DD format."
+_DATE_MESSAGES = {"invalid": _DATE_MESSAGE, "invalid_date": _DATE_MESSAGE}
+_DATETIME_MESSAGE = "Enter a valid date and time."
+_DATETIME_MESSAGES = {
+    "invalid": _DATETIME_MESSAGE,
+    "invalid_date": _DATE_MESSAGE,
+    "invalid_datetime": _DATETIME_MESSAGE,
+}
+# Django's default names the submitted row id.
+_EVENT_MESSAGES = {"invalid": "Choose an existing event."}
+_CLUB_MESSAGES = {"invalid": "Choose an existing club."}
+_MATCH_MESSAGES = {"invalid": "Choose an existing match."}
+_PLAYER_MESSAGES = {"invalid": "Choose an existing player."}
+_USER_MESSAGES = {"invalid": "Choose an existing account."}
+_APPLICATION_MESSAGES = {"invalid": "Choose an existing partner application."}
+
+_ONE_SUBMITTER = "A match has exactly one submitter: an account or an application."
+_EXTERNAL_ID_NEEDS_APPLICATION = (
+    "Only a match submitted by a partner application can have an external ID."
+)
+_EXTERNAL_ID_TAKEN = "This application already submitted a match with this external ID."
+_PLAYED_AT_NEEDS_OFFSET = "Give the venue's UTC offset with the time played."
+_OFFSET_NEEDS_PLAYED_AT = "Give the time played with the venue's UTC offset."
+_LOCAL_DATE = "The date played must be the local date of the time played."
+
+# played_at shifted to the venue's local time, as a date. Postgres keeps a
+# timestamptz in UTC and drops its offset, so the offset is stored apart.
+# The explicit AT TIME ZONE makes the result independent of the session's
+# time zone. (TruncDate's tzinfo cannot be written to a migration.)
+_PLAYED_AT_UTC = Func(
+    F("played_at"),
+    template="(%(expressions)s AT TIME ZONE 'UTC')",
+    output_field=DateTimeField(),
+)
+_LOCAL_PLAYED_ON = Cast(
+    _PLAYED_AT_UTC
+    + ExpressionWrapper(
+        F("played_at_utc_offset") * Value(timedelta(minutes=1)),
+        output_field=DurationField(),
+    ),
+    output_field=DateField(),
+)
+
+
+class MatchFormat(models.TextChoices):
+    """Singles or doubles. The values are ``open_engine.MatchFormat``'s."""
+
+    SINGLES = "singles", "Singles"
+    DOUBLES = "doubles", "Doubles"
+
+
+class MatchStatus(models.TextChoices):
+    """Where a Match is in confirmation. #26 owns the changes between them."""
+
+    PENDING = "pending", "Pending"
+    CONFIRMED = "confirmed", "Confirmed"
+    DISPUTED = "disputed", "Disputed"
+    VOIDED = "voided", "Voided"
+
+
+class ScoringType(models.TextChoices):
+    """How points are scored. The values are ``open_engine.ScoringType``'s."""
+
+    SIDE_OUT = "side_out", "Side-out"
+    RALLY = "rally", "Rally"
+
+
+class BestOf(models.IntegerChoices):
+    """How many games a Match is played to (decision F15 in #1)."""
+
+    ONE = 1, "Best of 1"
+    THREE = 3, "Best of 3"
+    FIVE = 5, "Best of 5"
+
+
+class GameTarget(models.IntegerChoices):
+    """The points a game is played to: the engine's game formats (F15)."""
+
+    ELEVEN = 11, "11 points"
+    FIFTEEN = 15, "15 points"
+    TWENTY_ONE = 21, "21 points"
+
+
+class Team(models.TextChoices):
+    """One side of a Match."""
+
+    A = "A", "Team A"
+    B = "B", "Team B"
+
+
+class Match(_CleanedTextModel):
+    """One match in the ledger (CONTEXT.md, Match).
+
+    Exactly one of ``submitted_by_user`` and ``submitted_by_application`` is
+    set. ``external_id`` is the submitting application's own id for the
+    match, so only an application's match has one.
+
+    ``played_at`` and ``played_at_utc_offset`` are both set or both empty.
+    The offset is minutes east of UTC at the venue, and ``played_at``
+    shifted by it falls on ``played_on``.
+    """
+
+    public_code_type = CodeType.MATCH
+    TEXT_FIELDS: ClassVar[tuple[str, ...]] = (
+        "external_id",
+        "location",
+        "event_label",
+        "bracket_label",
+    )
+
+    format = models.CharField(
+        max_length=10, choices=MatchFormat, error_messages=CHOICE_MESSAGES
+    )
+    event = models.ForeignKey(
+        "events.Event",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="matches",
+        error_messages=_EVENT_MESSAGES,
+    )
+    club = models.ForeignKey(
+        "clubs.Club",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="matches",
+        error_messages=_CLUB_MESSAGES,
+    )
+    played_on = models.DateField(error_messages=_DATE_MESSAGES)
+    played_at = models.DateTimeField(
+        null=True, blank=True, error_messages=_DATETIME_MESSAGES
+    )
+    played_at_utc_offset = models.SmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[
+            MinValueValidator(MIN_UTC_OFFSET_MINUTES),
+            MaxValueValidator(MAX_UTC_OFFSET_MINUTES),
+        ],
+        error_messages=_NUMBER_MESSAGES,
+        help_text="Minutes east of UTC at the venue",
+    )
+    sequence = models.PositiveIntegerField(default=0, error_messages=_NUMBER_MESSAGES)
+    status = models.CharField(
+        max_length=10,
+        choices=MatchStatus,
+        default=MatchStatus.PENDING,
+        error_messages=CHOICE_MESSAGES,
+    )
+    best_of = models.PositiveSmallIntegerField(
+        choices=BestOf, error_messages=_INTEGER_CHOICE_MESSAGES
+    )
+    game_target = models.PositiveSmallIntegerField(
+        choices=GameTarget,
+        default=GameTarget.ELEVEN,
+        error_messages=_INTEGER_CHOICE_MESSAGES,
+    )
+    scoring_type = models.CharField(
+        max_length=10,
+        choices=ScoringType,
+        default=ScoringType.SIDE_OUT,
+        error_messages=CHOICE_MESSAGES,
+    )
+    submitted_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="submitted_matches",
+        error_messages=_USER_MESSAGES,
+    )
+    submitted_by_application = models.ForeignKey(
+        settings.OAUTH2_PROVIDER_APPLICATION_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="submitted_matches",
+        error_messages=_APPLICATION_MESSAGES,
+    )
+    external_id = models.CharField(max_length=128, blank=True, default="")
+    location = models.CharField(max_length=200, blank=True, default="")
+    event_label = models.CharField(max_length=200, blank=True, default="")
+    bracket_label = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name_plural = "matches"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=(
+                    Q(submitted_by_user__isnull=False)
+                    & Q(submitted_by_application__isnull=True)
+                )
+                | (
+                    Q(submitted_by_user__isnull=True)
+                    & Q(submitted_by_application__isnull=False)
+                ),
+                name="matches_match_one_submitter",
+            ),
+            models.CheckConstraint(
+                condition=Q(format__in=MatchFormat.values),
+                name="matches_match_format_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(status__in=MatchStatus.values),
+                name="matches_match_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(scoring_type__in=ScoringType.values),
+                name="matches_match_scoring_type_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(best_of__in=BestOf.values),
+                name="matches_match_best_of_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(game_target__in=GameTarget.values),
+                name="matches_match_game_target_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(played_at__isnull=True, played_at_utc_offset__isnull=True)
+                | Q(played_at__isnull=False, played_at_utc_offset__isnull=False),
+                name="matches_match_played_at_pair",
+            ),
+            models.CheckConstraint(
+                condition=Q(
+                    played_at_utc_offset__gte=MIN_UTC_OFFSET_MINUTES,
+                    played_at_utc_offset__lte=MAX_UTC_OFFSET_MINUTES,
+                ),
+                name="matches_match_played_at_utc_offset_range",
+            ),
+            models.CheckConstraint(
+                condition=Q(played_on=_LOCAL_PLAYED_ON),
+                name="matches_match_played_at_local_date",
+            ),
+            models.CheckConstraint(
+                condition=Q(external_id="") | Q(submitted_by_application__isnull=False),
+                name="matches_match_external_id_needs_application",
+            ),
+            models.UniqueConstraint(
+                fields=("submitted_by_application", "external_id"),
+                condition=~Q(external_id=""),
+                name="matches_match_external_id_unique_per_application",
+                violation_error_message=_EXTERNAL_ID_TAKEN,
+            ),
+        ]
+
+    def __str__(self) -> str:
+        # The OPEN Code, never a name, for one rule with Club and Event.
+        return self.public_code
+
+    def clean(self) -> None:
+        # Django runs clean() even when a field failed, so a value may still
+        # be the raw input here: check its type before using it.
+        errors: dict[str, str] = {}
+        has_user = self.submitted_by_user_id is not None
+        has_application = self.submitted_by_application_id is not None
+        if has_user == has_application:
+            errors["submitted_by_user"] = _ONE_SUBMITTER
+            errors["submitted_by_application"] = _ONE_SUBMITTER
+        if self.external_id and not has_application:
+            errors["external_id"] = _EXTERNAL_ID_NEEDS_APPLICATION
+
+        played_at, offset = self.played_at, self.played_at_utc_offset
+        if played_at is not None and offset is None:
+            errors["played_at_utc_offset"] = _PLAYED_AT_NEEDS_OFFSET
+        elif played_at is None and offset is not None:
+            errors["played_at"] = _OFFSET_NEEDS_PLAYED_AT
+        elif (
+            isinstance(played_at, datetime.datetime)
+            and played_at.tzinfo is not None
+            and isinstance(offset, int)
+            and MIN_UTC_OFFSET_MINUTES <= offset <= MAX_UTC_OFFSET_MINUTES
+            and isinstance(self.played_on, datetime.date)
+            and not isinstance(self.played_on, datetime.datetime)
+        ):
+            local = played_at.astimezone(UTC) + timedelta(minutes=offset)
+            if local.date() != self.played_on:
+                errors["played_on"] = _LOCAL_DATE
+        if errors:
+            raise ValidationError(errors)
+
+
+class MatchParticipant(models.Model):
+    """A Player on one team of a Match. A Player plays once per Match."""
+
+    match = models.ForeignKey(
+        Match,
+        on_delete=models.CASCADE,
+        related_name="participants",
+        error_messages=_MATCH_MESSAGES,
+    )
+    player = models.ForeignKey(
+        "players.Player",
+        on_delete=models.PROTECT,
+        related_name="match_participations",
+        error_messages=_PLAYER_MESSAGES,
+    )
+    team = models.CharField(max_length=1, choices=Team, error_messages=CHOICE_MESSAGES)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=Q(team__in=Team.values),
+                name="matches_matchparticipant_team_valid",
+            ),
+            models.UniqueConstraint(
+                fields=("match", "player"),
+                name="matches_matchparticipant_player_once_per_match",
+                violation_error_message="This player is already in this match.",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        # The match code and team, never the Player's name.
+        return f"{self.match.public_code} team {self.team}"
+
+
+class Game(models.Model):
+    """One game of a Match, numbered from 1. Scores are never negative."""
+
+    match = models.ForeignKey(
+        Match,
+        on_delete=models.CASCADE,
+        related_name="games",
+        error_messages=_MATCH_MESSAGES,
+    )
+    game_number = models.PositiveSmallIntegerField(error_messages=_NUMBER_MESSAGES)
+    team_a_score = models.PositiveSmallIntegerField(error_messages=_NUMBER_MESSAGES)
+    team_b_score = models.PositiveSmallIntegerField(error_messages=_NUMBER_MESSAGES)
+
+    class Meta:
+        ordering = ("match", "game_number")
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=Q(game_number__gte=1, game_number__lte=MAX_GAMES),
+                name="matches_game_number_range",
+            ),
+            models.UniqueConstraint(
+                fields=("match", "game_number"),
+                name="matches_game_number_once_per_match",
+                violation_error_message="This match already has a game with this number.",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.match.public_code} game {self.game_number}"

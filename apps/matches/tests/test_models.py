@@ -9,6 +9,11 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+
+from apps.accounts.models import User
+from apps.accounts.tests.factories import UserFactory
 from apps.matches.models import (
     MAX_GAMES,
     MAX_UTC_OFFSET_MINUTES,
@@ -23,11 +28,6 @@ from apps.matches.models import (
     ScoringType,
     Team,
 )
-from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
-
-from apps.accounts.models import User
-from apps.accounts.tests.factories import UserFactory
 from apps.partners.models import PartnerApplication
 from apps.partners.tests.factories import PartnerApplicationFactory
 from apps.players.models import Player
@@ -37,7 +37,7 @@ from apps.public_ids.models import IssuedCode
 
 pytestmark = pytest.mark.django_db
 
-MATCH_CODE = re.compile(r"^M-[0-9A-Z]{4}-[0-9A-Z]{4}$")
+MATCH_CODE = re.compile(r"^M-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$")
 
 # A made-up value that must never show up in a validation message.
 MARKER = "zqxjmarker"
@@ -255,7 +255,7 @@ def test_full_clean_refuses_external_id_on_an_account_submission(
 
 
 def test_negative_sequence_is_refused(user: User) -> None:
-    _refused("matches_match_sequence", **_values(user, sequence=-1))
+    _refused("matches_match_sequence_check", **_values(user, sequence=-1))
 
 
 # Choices at the database (criteria 7, 8, 9, 11).
@@ -559,7 +559,7 @@ def test_two_games_with_one_number_are_refused(match: Match) -> None:
 
 @pytest.mark.parametrize("side", ["team_a_score", "team_b_score"])
 def test_negative_score_is_refused(match: Match, side: str) -> None:
-    _game_refused(f"matches_game_{side}_not_negative", match, **{side: -1})
+    _game_refused(f"matches_game_{side}_check", match, **{side: -1})
 
 
 def test_game_str_is_the_match_code_and_number(match: Match) -> None:

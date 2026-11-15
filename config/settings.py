@@ -269,6 +269,7 @@ INSTALLED_APPS = [
     # After oauth2_provider, so its admin module replaces the
     # Application admin that oauth2_provider registers.
     "apps.partners",
+    "apps.matches",
 ]
 
 # The OPEN Account login model, keyed on email (apps/accounts).
