@@ -50,9 +50,7 @@ def superuser_client(client: Client, superuser: "_User") -> Client:
     return client
 
 
-def _run_action(
-    client: Client, action: str, organizers: list[Organizer]
-) -> list[str]:
+def _run_action(client: Client, action: str, organizers: list[Organizer]) -> list[str]:
     response = client.post(
         reverse(ORGANIZER_CHANGELIST),
         {"action": action, "_selected_action": [str(o.pk) for o in organizers]},
@@ -189,9 +187,7 @@ def test_unverify_action_clears_and_records_event(
 
     organizer.refresh_from_db()
     assert organizer.is_verified is False
-    assert (
-        AuditEvent.objects.filter(action=AuditAction.ORGANIZER_UNVERIFY).count() == 1
-    )
+    assert AuditEvent.objects.filter(action=AuditAction.ORGANIZER_UNVERIFY).count() == 1
 
 
 def test_verify_action_twice_records_one_event(superuser_client: Client) -> None:

@@ -30,7 +30,9 @@ REASON = "Made-up reason: checked the organizer's documents."
 def _verifier(**fields: object) -> "_User":
     account: _User = UserFactory.create(is_staff=True, **fields)
     account.user_permissions.add(
-        Permission.objects.get(content_type__app_label="clubs", codename="verify_organizer")
+        Permission.objects.get(
+            content_type__app_label="clubs", codename="verify_organizer"
+        )
     )
     # Drop the cached permissions, so has_perm reads the new grant.
     return type(account)._default_manager.get(pk=account.pk)

@@ -157,7 +157,7 @@ def test_organizer_refuses_control_characters_without_echo() -> None:
 
 
 def test_text_fields_refuse_non_text() -> None:
-    club = Club(name=12345)  # type: ignore[misc]
+    club = Club(name=12345)
 
     with pytest.raises(ValidationError) as error:
         club.full_clean()
@@ -235,20 +235,22 @@ def test_invalid_role_refused_without_echo(model: str) -> None:
     assert MARKER not in _messages(error.value)
 
 
-@pytest.mark.parametrize("model", [OrganizerMember, ClubRole])
-def test_database_refuses_invalid_role(
-    model: type[OrganizerMember | ClubRole],
-) -> None:
+def test_database_refuses_invalid_member_role() -> None:
+    organizer = Organizer.objects.create(name="Made-up Events")
     account = UserFactory.create()
+
     with pytest.raises(IntegrityError), transaction.atomic():
-        if model is OrganizerMember:
-            organizer = Organizer.objects.create(name="Made-up Events")
-            OrganizerMember.objects.create(
-                organizer=organizer, account=account, role="owner"
-            )
-        else:
-            club = Club.objects.create(name="Made-up Club")
-            ClubRole.objects.create(club=club, account=account, role="owner")
+        OrganizerMember.objects.create(
+            organizer=organizer, account=account, role="owner"
+        )
+
+
+def test_database_refuses_invalid_club_role() -> None:
+    club = Club.objects.create(name="Made-up Club")
+    account = UserFactory.create()
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ClubRole.objects.create(club=club, account=account, role="owner")
 
 
 def test_role_str_has_code_and_role_not_email() -> None:

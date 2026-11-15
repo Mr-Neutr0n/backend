@@ -130,9 +130,7 @@ class Organizer(_CleanedTextModel):
     )
 
     class Meta:
-        permissions: ClassVar[list[tuple[str, str]]] = [
-            ("verify_organizer", "Can verify or unverify an organizer"),
-        ]
+        permissions = (("verify_organizer", "Can verify or unverify an organizer"),)
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=~Q(name__regex=r"^\s*$"),

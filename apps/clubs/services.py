@@ -54,9 +54,7 @@ def _set_verified(
     organizer: Organizer, *, actor: "_User", reason: str, verified: bool
 ) -> Organizer:
     if not (
-        actor.is_authenticated
-        and actor.is_active
-        and actor.has_perm(VERIFY_PERMISSION)
+        actor.is_authenticated and actor.is_active and actor.has_perm(VERIFY_PERMISSION)
     ):
         raise NotAllowedToVerify(
             "Only an active Account with permission can verify an organizer."
