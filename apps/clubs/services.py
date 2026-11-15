@@ -5,7 +5,9 @@ rule 8), so these are the only ways to change ``verified_at`` and
 ``verified_by``. Each refuses, before any write, an actor that is not an
 active Account with ``clubs.verify_organizer``, or that is a member of the
 Organizer. A change records one Audit Event in the same transaction. A
-call that would change nothing records nothing.
+call that would change nothing records nothing. Each call sets
+``organizer.verification_changed`` to whether that call changed the
+status, so a caller (the admin) reports only its own changes.
 """
 
 from typing import TYPE_CHECKING
@@ -53,6 +55,7 @@ def unverify_organizer(
 def _set_verified(
     organizer: Organizer, *, actor: "_User", reason: str, verified: bool
 ) -> Organizer:
+    organizer.verification_changed = False
     if not (
         actor.is_authenticated and actor.is_active and actor.has_perm(VERIFY_PERMISSION)
     ):
@@ -67,7 +70,8 @@ def _set_verified(
             raise NotAllowedToVerify(
                 "A member of an organizer cannot verify or unverify it."
             )
-        if locked.is_verified != verified:
+        changed = locked.is_verified != verified
+        if changed:
             before = snapshot(locked, _FIELDS)
             if verified:
                 locked.verified_at = timezone.now()
@@ -89,5 +93,6 @@ def _set_verified(
                 reason=reason,
             )
     organizer.verified_at = locked.verified_at
+    organizer.verification_changed = changed
     organizer.verified_by_id = locked.verified_by_id
     return organizer

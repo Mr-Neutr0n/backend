@@ -127,6 +127,10 @@ class Organizer(_CleanedTextModel):
 
     public_code_type = CodeType.ORGANIZER
     TEXT_FIELDS: ClassVar[tuple[str, ...]] = ("name",)
+    # Not a field. The services set it on the instance they are given at
+    # every call: True when that call changed the verified status, so a
+    # caller can report exactly what it did.
+    verification_changed: bool = False
 
     name = models.CharField(max_length=200)
     verified_at = models.DateTimeField(null=True, blank=True, editable=False)

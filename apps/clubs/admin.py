@@ -183,9 +183,8 @@ class OrganizerAdmin(admin.ModelAdmin[Organizer]):
     ) -> None:
         count = 0
         for organizer in queryset.order_by("pk"):
-            was_verified = organizer.is_verified
             try:
-                change(organizer, actor=request.user, reason=ADMIN_REASON)
+                result = change(organizer, actor=request.user, reason=ADMIN_REASON)
             except NotAllowedToVerify:
                 # The OPEN Code only: the name may be a person's.
                 self.message_user(
@@ -203,8 +202,9 @@ class OrganizerAdmin(admin.ModelAdmin[Organizer]):
                     level=messages.WARNING,
                 )
                 continue
-            # A call that found the status already set changed nothing.
-            if organizer.is_verified != was_verified:
+            # Only what this call changed: the row may have been changed by
+            # someone else after the changelist loaded it.
+            if result.verification_changed:
                 count += 1
         if count:
             self.message_user(request, f"{count} organizer(s) {done}.")
