@@ -85,13 +85,17 @@ _EXTERNAL_ID_NEEDS_APPLICATION = (
     "Only a match submitted by a partner application can have an external ID."
 )
 _EXTERNAL_ID_TAKEN = "This application already submitted a match with this external ID."
-_PLAYED_AT_NEEDS_OFFSET = "Give the venue's UTC offset with the time played."
-_OFFSET_NEEDS_PLAYED_AT = "Give the time played with the venue's UTC offset."
+_PLAYED_AT_NEEDS_OFFSET = (
+    "Give the UTC offset where the match was played with the time played."
+)
+_OFFSET_NEEDS_PLAYED_AT = (
+    "Give the time played with the UTC offset where the match was played."
+)
 _PLAYED_AT_NAIVE = "Give the time played with its time zone."
 _PLAYED_AT_OUT_OF_RANGE = "Enter a time played within the supported dates."
 _LOCAL_DATE = "The date played must be the local date of the time played."
 
-# played_at shifted to the venue's local time, as a date. Postgres keeps a
+# played_at shifted to local time where the match was played, as a date. Postgres keeps a
 # timestamptz in UTC and drops its offset, so the offset is stored apart.
 # The explicit AT TIME ZONE makes the result independent of the session's
 # time zone. (TruncDate's tzinfo cannot be written to a migration.)
@@ -208,8 +212,11 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
     match, so only an application's match has one.
 
     ``played_at`` and ``played_at_utc_offset`` are both set or both empty.
-    The offset is minutes east of UTC at the venue, and ``played_at``
-    shifted by it falls on ``played_on``.
+    The offset is minutes east of UTC where the match was played, and
+    ``played_at`` shifted by it falls on ``played_on``.
+
+    ``location`` is the place's name, such as a court or park. It is never a
+    street address or an exact location (ADR 0009).
     """
 
     public_code_type = CodeType.MATCH
@@ -251,7 +258,7 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
             MaxValueValidator(MAX_UTC_OFFSET_MINUTES),
         ],
         error_messages=_NUMBER_MESSAGES,
-        help_text="Minutes east of UTC at the venue",
+        help_text="Minutes east of UTC where the match was played",
     )
     sequence = models.PositiveIntegerField(default=0, error_messages=_NUMBER_MESSAGES)
     status = models.CharField(
@@ -291,7 +298,12 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
         error_messages=_APPLICATION_MESSAGES,
     )
     external_id = models.CharField(max_length=128, blank=True, default="")
-    location = models.CharField(max_length=200, blank=True, default="")
+    location = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text="The place's name, such as a court or park. Never a street address.",
+    )
     event_label = models.CharField(max_length=200, blank=True, default="")
     bracket_label = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)

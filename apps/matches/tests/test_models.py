@@ -43,7 +43,7 @@ MATCH_CODE = re.compile(r"^M-[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$")
 MARKER = "zqxjmarker"
 
 PLAYED_ON = date(2026, 6, 1)
-# 19:00 at the venue, seven hours behind UTC: 02:00 UTC the next day.
+# 19:00 where the match was played, seven hours behind UTC: 02:00 UTC the next day.
 VENUE_OFFSET = -420
 PLAYED_AT = datetime(2026, 6, 1, 19, 0, tzinfo=timezone(timedelta(minutes=-420)))
 
