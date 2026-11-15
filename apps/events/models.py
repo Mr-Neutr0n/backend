@@ -31,7 +31,7 @@ DEFAULT_WEIGHT = Decimal("1.00")
 
 # Messages never include the submitted value (CLAUDE.md, API). Django's
 # defaults for these keys do.
-_CHOICE_MESSAGES = {"invalid_choice": "Choose one of the listed options."}
+CHOICE_MESSAGES = {"invalid_choice": "Choose one of the listed options."}
 _DATE_MESSAGE = "Enter a valid date in YYYY-MM-DD format."
 _DATE_MESSAGES = {"invalid": _DATE_MESSAGE, "invalid_date": _DATE_MESSAGE}
 _NUMBER_MESSAGES = {"invalid": "Enter a number."}
@@ -59,7 +59,7 @@ class Event(_CleanedTextModel):
 
     name = models.CharField(max_length=200)
     kind = models.CharField(
-        max_length=20, choices=EventKind, error_messages=_CHOICE_MESSAGES
+        max_length=20, choices=EventKind, error_messages=CHOICE_MESSAGES
     )
     organizer = models.ForeignKey(
         "clubs.Organizer", on_delete=models.PROTECT, related_name="events"
