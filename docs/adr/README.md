@@ -42,7 +42,7 @@ Each option we rejected, and why.
 
 ## Planned records
 
-Many decisions are already made in GitHub issue #1 (the backend plan). Records turn them into permanent documents. Choices from issue #1 that may deserve a record later: how the append-only Ledger is enforced, incremental updates versus replay (Q6), engine pinning (Q4), and partner API authentication (Q2, Q3).
+Many decisions are already made in GitHub issue #1 (the backend plan). Records turn them into permanent documents. Choices from issue #1 that may deserve a record later: how the append-only Ledger is enforced, incremental updates versus replay (Q6), and engine pinning (Q4). The partner Application model (Q3) is recorded in ADR 0010.
 
 ## Index
 
@@ -57,3 +57,4 @@ Add each record here when it merges.
 - [0007. An append-only audit log enforced in the database](0007-append-only-audit-log.md) (issue #17)
 - [0008. Public identifiers: OPEN Codes](0008-public-identifiers.md) (issue #92)
 - [0009. Personal data: what OPEN collects and how it is protected](0009-personal-data.md) (issue #93)
+- [0010. Partner applications: a swapped OAuth Application model](0010-partner-application-model.md) (issue #22)

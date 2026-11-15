@@ -53,6 +53,14 @@ _Avoid_: competition.
 An app, league platform, club, or tournament that integrates with OPEN through the APIs. Partners use OPEN for free.
 _Avoid_: customer, client, vendor.
 
+**Partner Application**:
+What a Partner registers to reach OPEN's APIs through OAuth. It starts unapproved; a moderator approves production access (#29). It may belong to an Organizer (#79 decides what that allows). Backend: `partners.PartnerApplication`.
+_Avoid_: client, app (alone), integration.
+
+**Club Application Grant**:
+A Club's permission for one Partner Application to submit that Club's matches (#79). Backend: `partners.ClubApplicationGrant`.
+_Avoid_: authorization, consent (that is a player's approval of a linked app, #76).
+
 **External ID**:
 A Player's identifier in another system, keyed by source. Used for identity matching, never as the OPEN primary key. Engine: `Player.external_ids`.
 
@@ -134,7 +142,7 @@ Running the engine on real results without publishing or relying on its Ratings.
 ## Records
 
 **Audit Event**:
-One recorded sensitive action: who did it (an Account, or nobody), what it changed (the target), the values before and after (for an identifying personal data field, only its name, ADR 0009), and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, privacy changes, a player's own profile changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
+One recorded sensitive action: who did it (an Account, a Partner Application, both, or nobody), what it changed (the target), the values before and after (for an identifying personal data field, only its name, ADR 0009), and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, privacy changes, a player's own profile changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
 _Avoid_: log entry (Django's admin `LogEntry` is a different thing), history.
 
 ## Governance terms
