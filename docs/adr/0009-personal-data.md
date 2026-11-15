@@ -67,7 +67,7 @@ Only the player sets these, on their own Player. No Organizer, Partner, CSV uplo
 
 ### Identifying personal data fields
 
-The identifying personal data fields are the email address, display name, legal name, birth year and month, gender division, city and region, the name of an Organizer that is one person (#20), External IDs (#49), and platform player IDs (#82). The set holds every field that names, ages, locates, or points to the person outside OPEN, since any of them in an old Audit Event would re-identify a deleted Player. Rules in this record that name this set apply only to the set. Account deletion is wider and removes all personal data (Retention). All personal data, identifying or not, is listed in the inventory. Audit Events may record the values of other personal data: Ratings and Matches (ADR 0007), permissions, and privacy settings (#19's privacy change audit task).
+The identifying personal data fields are the email address, display name, legal name, birth year and month, gender division, city and region, an Organizer's name, which may be a person's (#20), External IDs (#49), and platform player IDs (#82). The set holds every field that names, ages, locates, or points to the person outside OPEN, since any of them in an old Audit Event would re-identify a deleted Player. Rules in this record that name this set apply only to the set. Account deletion is wider and removes all personal data (Retention). All personal data, identifying or not, is listed in the inventory. Audit Events may record the values of other personal data: Ratings and Matches (ADR 0007), permissions, and privacy settings (#19's privacy change audit task).
 
 ### What OPEN does not collect
 
@@ -94,7 +94,7 @@ Personal data stays while the Account exists. There is no automatic deletion of 
 - Deleting an Account removes all of its personal data from the live database at once, and ends and deletes its sessions (#116), except what this list names. What stays, and why:
   - The Player, with its OPEN Code, Matches, and Ratings (the Ledger, ADR 0002, hard rule 3).
   - Audit Events, which are append-only (ADR 0007) and never hold an identifying field's value (the audit rule in this record).
-  - For an Account that has acted, its row with the identifying fields cleared (`PROTECT`, ADR 0007).
+  - For an Account that has acted, its row with the identifying fields cleared (`PROTECT`, ADR 0007), and the links that point to it, such as `clubs.Organizer.verified_by`.
   - None of these keeps a name, email, or age.
 - Everything else the inventory lists for that Account or Player goes, with two exceptions below: uploaded results files age out within 30 days, and copies held by outside processors follow #35. Examples of what goes: home club, privacy settings, Organizer memberships and Club Roles, the name of an Organizer that is that person, External ID and external rating (#49), platform player IDs (#82), email addresses, MFA authenticators, and Log in with OPEN grants.
 - Deleting platform player IDs at Account deletion settles the #82 half of ADR 0002's open question on whether new Matches can name a deleted Player. The OPEN Code half stays with #116.

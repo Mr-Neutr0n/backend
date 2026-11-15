@@ -59,9 +59,10 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 
 ## Clubs and organizers
 
-- A verified Organizer's submissions count as confirmed, so verification is a security-sensitive area (hard rule 8). Change `Organizer.verified_at` and `verified_by` only through `apps.clubs.services.verify_organizer()` and `unverify_organizer()`. They refuse any actor but an active Account with the `clubs.verify_organizer` permission that is not a member of that Organizer, and record one Audit Event when the status changes. The `Organizer.save()` docstring lists the writes that skip them.
+- A verified Organizer's submissions count as confirmed, so verification is a security-sensitive area (hard rule 8). Change `Organizer.verified_at` and `verified_by` only through `apps.clubs.services.verify_organizer()` and `unverify_organizer()`. They refuse any actor but an active Account with the `clubs.verify_organizer` permission that is not a member of that Organizer, and record one Audit Event when the status changes. The `Organizer.save()` docstring lists the writes that skip them; `bulk_create` and `loaddata` skip them too (see Public identifiers).
 - While an Organizer is verified, the Account that verified it cannot become its member (`bulk_create` and `QuerySet.update` skip this check). A verified Organizer cannot be deleted: unverify it first (`QuerySet.delete()` skips this check).
-- `OrganizerMember.account` and `Organizer.verified_by` use `PROTECT`, so an Account that is a member or that verified an Organizer cannot be hard-deleted. A one-person Organizer's name is that person's name, an identifying field. #116 carries out what ADR 0009's Retention section decides for both. `ClubRole.account` cascades.
+- `OrganizerMember.account` uses `PROTECT`, so an Account that is a member cannot be hard-deleted. `Organizer.verified_by` uses `PROTECT` while the Organizer is verified; after that, the verify event's actor keeps the Account row (Audit log). `ClubRole.account` cascades.
+- Every Organizer's name may be a person's name, so it is an identifying field. #116 carries out what ADR 0009's Retention section decides for memberships, Club Roles, and Organizer names.
 - The permission rules that use these roles are #79. Membership and role changes record no Audit Event until #158 lands.
 
 ## Public identifiers
@@ -77,7 +78,7 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - Never store a full birthdate (store birth year and month only), a raw gender, a street address, a phone number, or payment data.
 - Only the player sets their own display name, legal name, birth year and month, gender division, and city and region. Others may only remove them (#114, #116).
 - Every path that creates a Player refuses anyone under 13, and a new Player always has a birth year and month. Players aged 13 to 17 are left out of all partner sharing. A Player whose birth year and month were removed (#114, #116) is excluded from all partner sharing, permanently.
-- The identifying personal data fields are email, display name, legal name, birth year and month, gender division, city and region, a one-person Organizer's name (`clubs.Organizer.name`), External IDs (#49), and platform player IDs (#82). An Audit Event about one of them records the field's name, never its value. Account deletion is wider: it removes all personal data except what ADR 0009's Retention section keeps.
+- The identifying personal data fields are email, display name, legal name, birth year and month, gender division, city and region, an Organizer's name (`clubs.Organizer.name`), External IDs (#49), and platform player IDs (#82). An Audit Event about one of them records the field's name, never its value. Account deletion is wider: it removes all personal data except what ADR 0009's Retention section keeps.
 - No model's `__str__` returns an identifying field, so the admin log's `object_repr` and admin messages never hold one (a Player's, a Club's, and an Organizer's return their OPEN Code). `accounts.User.__str__` returns the email, the known exception: #116 clears the admin log entries tied to a deleted Account.
 
 ## API
