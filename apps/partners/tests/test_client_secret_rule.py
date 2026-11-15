@@ -1,9 +1,9 @@
-"""The stateless client secret rule: well-formed hashes pass, others not."""
+"""The stored client secret is never rewritten; a written one must be raw."""
 
 import base64
 
 import pytest
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.test import Client
 
 from apps.partners.models import PartnerApplication
@@ -30,13 +30,50 @@ def _token(client: Client, client_id: str, secret: str) -> int:
     return response.status_code
 
 
-def test_well_formed_hash_is_accepted_and_needs_its_secret(client: Client) -> None:
-    hashed = make_password(RAW_SECRET)
-    application = PartnerApplicationFactory.create(client_secret=hashed)
+def test_well_formed_hash_is_refused_on_create() -> None:
+    with pytest.raises(ValueError, match="client secret"):
+        PartnerApplicationFactory.create(client_secret=make_password(RAW_SECRET))
 
-    assert _stored(application.pk) == hashed
-    assert _token(client, application.client_id, RAW_SECRET) == 200
-    assert _token(client, application.client_id, hashed) == 401
+    assert PartnerApplication.objects.count() == 0
+
+
+def test_well_formed_hash_is_refused_as_a_rotation() -> None:
+    application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
+    before = _stored(application.pk)
+    loaded = PartnerApplication.objects.get(pk=application.pk)
+
+    loaded.client_secret = make_password("made-up-other-secret")
+    with pytest.raises(ValueError, match="client secret"):
+        loaded.save(update_fields=["client_secret"])
+
+    assert _stored(application.pk) == before
+
+
+def test_hash_shaped_value_on_loaded_row_is_not_written() -> None:
+    application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
+    before = _stored(application.pk)
+    loaded = PartnerApplication.objects.get(pk=application.pk)
+
+    loaded.client_secret = make_password("made-up-other-secret")
+    loaded.full_clean()
+    loaded.save()
+
+    assert _stored(application.pk) == before
+
+
+def test_new_raw_secret_on_loaded_row_replaces_the_old(client: Client) -> None:
+    application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
+    loaded = PartnerApplication.objects.get(pk=application.pk)
+    new_secret = "made-up-rotated-secret-for-tests"
+
+    loaded.client_secret = new_secret
+    loaded.save()
+
+    stored = _stored(application.pk)
+    assert stored != new_secret
+    assert check_password(new_secret, stored) is True
+    assert _token(client, application.client_id, new_secret) == 200
+    assert _token(client, application.client_id, RAW_SECRET) == 401
 
 
 def test_argon2_shaped_value_is_refused() -> None:
@@ -46,7 +83,7 @@ def test_argon2_shaped_value_is_refused() -> None:
     assert PartnerApplication.objects.count() == 0
 
 
-def test_stored_hash_survives_full_save() -> None:
+def test_full_save_of_loaded_row_keeps_stored_hash() -> None:
     application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
     before = _stored(application.pk)
     loaded = PartnerApplication.objects.get(pk=application.pk)
