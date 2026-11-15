@@ -101,3 +101,31 @@ class PartnerApplication(AbstractApplication):
                 and field.name not in APPROVAL_FIELDS
             ]
         super().save(*args, **kwargs)
+
+
+class ClubApplicationGrant(models.Model):
+    """A Club's permission for one Partner Application.
+
+    The rules that use it (which application may submit a Club's matches)
+    are #79. A grant change records no Audit Event yet.
+    """
+
+    club = models.ForeignKey(
+        "clubs.Club", on_delete=models.CASCADE, related_name="application_grants"
+    )
+    application = models.ForeignKey(
+        PartnerApplication, on_delete=models.CASCADE, related_name="club_grants"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.UniqueConstraint(
+                fields=["club", "application"],
+                name="partners_clubapplicationgrant_unique_pair",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        # Codes, never a name (CLAUDE.md, Personal data).
+        return f"{self.club.public_code} {self.application.client_id}"
