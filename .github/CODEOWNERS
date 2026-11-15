@@ -20,5 +20,9 @@
 # Public identifiers partners store forever; codes must resist enumeration.
 /apps/public_ids/ @openpickleball/maintainers
 
+# Player personal data, privacy settings, and the Player to Account link,
+# the base for identity linking.
+/apps/players/ @openpickleball/maintainers
+
 # CI, the DCO check, and this file.
 /.github/ @openpickleball/maintainers

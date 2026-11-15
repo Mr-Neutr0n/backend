@@ -1,0 +1,352 @@
+"""Players and their privacy settings. See ADR 0002 and ADR 0009.
+
+Create a Player through ``apps.players.services.create_player``, which
+also creates its PlayerPrivacy row. Only the player changes these fields
+and settings, through the services in that module.
+"""
+
+import unicodedata
+from collections.abc import Collection
+from typing import TYPE_CHECKING, ClassVar
+
+from django.conf import settings
+from django.contrib.auth.models import AnonymousUser
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models
+from django.db.models import Q
+from django.utils import timezone
+
+from apps.public_ids.codes import CodeType
+from apps.public_ids.models import PublicCodeModel
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import _User
+
+# Messages never include the submitted value (CLAUDE.md, API). Django's
+# defaults for these keys do.
+_CHOICE_MESSAGES = {"invalid_choice": "Choose one of the listed options."}
+_WHOLE_NUMBER = "Enter a whole number."
+_INTEGER_MESSAGES = {"invalid": _WHOLE_NUMBER}
+_CONTROL_CHARACTER = "Remove control or invalid characters."
+# Control characters (Postgres cannot store NUL) and lone surrogates
+# (not encodable as UTF-8).
+_REFUSED_CATEGORIES = frozenset({"Cc", "Cs"})
+# Letters and symbols that render blank.
+_FILLERS = frozenset({"\u115f", "\u1160", "\u3164", "\uffa0", "\u2800", "\U0001d159"})
+# Letters, numbers, punctuation, and symbols, plus characters unassigned
+# in Python's Unicode data (Cn): newer scripts and emoji land there until
+# Python catches up.
+_VISIBLE_CATEGORY_GROUPS = ("L", "N", "P", "S", "Cn")
+
+# Text fields stripped and checked for control characters before field
+# validation, so max_length counts the stored value.
+TEXT_FIELDS = ("display_name", "legal_name", "city", "region")
+# Optional text fields where None means cleared, stored as "".
+OPTIONAL_TEXT_FIELDS = ("legal_name", "gender_division", "city", "region")
+# Fields that take only text (or None). Django's own conversion calls
+# str(), which turns any value into text and raises ValueError on an int
+# past Python's digit limit.
+STRING_FIELDS = (*TEXT_FIELDS, "gender_division")
+_NOT_TEXT = "Enter text."
+BIRTH_FIELDS = ("birth_year", "birth_month")
+
+EARLIEST_BIRTH_YEAR = 1900
+
+# One setting per profile detail other than the display name and current
+# Ratings, which have none (ADR 0002).
+PRIVACY_SETTINGS = (
+    "city_region_visibility",
+    "match_history_visibility",
+    "rating_history_visibility",
+    "stats_visibility",
+    "home_club_visibility",
+)
+
+
+class Visibility(models.TextChoices):
+    """Who may see a profile detail. ``PRIVATE`` is the most restrictive."""
+
+    SIGNED_IN = "signed_in", "Signed-in players"
+    PRIVATE = "private", "Only me"
+
+
+class GenderDivision(models.TextChoices):
+    """The gender division a Player enters. An empty value means none."""
+
+    MENS = "mens", "Men's"
+    WOMENS = "womens", "Women's"
+
+
+class Player(PublicCodeModel):
+    """A person who plays matches and has ratings (CONTEXT.md, Player).
+
+    Every Player belongs to one Account, and an Account has at most one
+    Player (ADR 0002). The fields are the ones ADR 0009 allows, and no
+    others: never a full birthdate or a raw gender.
+    """
+
+    public_code_type = CodeType.PLAYER
+
+    # PROTECT: deleting an Account keeps its Player (ADR 0002). #116
+    # decides how.
+    account = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="player"
+    )
+    display_name = models.CharField(max_length=64)
+    legal_name = models.CharField(max_length=200, blank=True)
+    birth_year = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(EARLIEST_BIRTH_YEAR)],
+        error_messages=_INTEGER_MESSAGES,
+    )
+    # Never the day (ADR 0009).
+    birth_month = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(12)],
+        error_messages=_INTEGER_MESSAGES,
+    )
+    gender_division = models.CharField(
+        max_length=8,
+        choices=GenderDivision,
+        blank=True,
+        error_messages=_CHOICE_MESSAGES,
+    )
+    city = models.CharField(max_length=100, blank=True)
+    region = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                # Refuses "" and whitespace only.
+                condition=~Q(display_name__regex=r"^\s*$"),
+                name="players_player_display_name_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=Q(birth_month__gte=1, birth_month__lte=12),
+                name="players_player_birth_month_range",
+            ),
+            models.CheckConstraint(
+                condition=Q(birth_year__gte=EARLIEST_BIRTH_YEAR),
+                name="players_player_birth_year_min",
+            ),
+            models.CheckConstraint(
+                condition=Q(gender_division__in=["", *GenderDivision.values]),
+                name="players_player_gender_division_valid",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        # The OPEN Code, never a name (ADR 0009).
+        return self.public_code
+
+    def clean_fields(self, exclude: Collection[str] | None = None) -> None:
+        """Normalize and check the input before Django's field validation.
+
+        None clears an optional text field. A text field refuses a value
+        that is not a string (None aside). Text is stripped first, so
+        max_length counts the stored value. Control characters and
+        lone surrogates are refused: Postgres cannot store NUL, and a
+        surrogate cannot be encoded. Birth year and month
+        must be real ints: Django's own conversion would truncate a float,
+        accept a bool, or overflow on infinity.
+        """
+        skip = set(exclude or ())
+        errors: dict[str, list[ValidationError]] = {}
+        for name in OPTIONAL_TEXT_FIELDS:
+            if name not in skip and getattr(self, name) is None:
+                setattr(self, name, "")
+        for name in STRING_FIELDS:
+            value = getattr(self, name)
+            if name not in skip and value is not None and not isinstance(value, str):
+                errors[name] = [ValidationError(_NOT_TEXT)]
+        for name in TEXT_FIELDS:
+            value = getattr(self, name)
+            if name in skip or name in errors or not isinstance(value, str):
+                continue
+            value = value.strip()
+            setattr(self, name, value)
+            if any(unicodedata.category(char) in _REFUSED_CATEGORIES for char in value):
+                errors[name] = [ValidationError(_CONTROL_CHARACTER)]
+        for name in BIRTH_FIELDS:
+            value = getattr(self, name)
+            if name in skip or value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int):
+                errors[name] = [ValidationError(_WHOLE_NUMBER)]
+        try:
+            super().clean_fields(exclude=skip | set(errors))
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        if errors:
+            raise ValidationError(errors)
+
+    def clean(self) -> None:
+        self._clean_rules(None)
+
+    def validate_changes(self, fields: Collection[str]) -> None:
+        """Like ``full_clean()``, with the content rules on ``fields`` only.
+
+        A profile change uses this, so a stored value that a later rule (or
+        newer Unicode data) refuses does not block an edit to another
+        field. Fields not in ``fields`` get no field or content checks.
+        Uniqueness and database constraints still run on the whole record,
+        skipping only fields that failed the checks above.
+        """
+        changed = set(fields)
+        unchanged = [
+            field.name
+            for field in self._meta.concrete_fields
+            if field.name not in changed
+        ]
+        errors: dict[str, list[ValidationError]] = {}
+        try:
+            self.clean_fields(exclude=unchanged)
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        try:
+            self._clean_rules(changed)
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        try:
+            self.validate_unique(exclude=list(errors))
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        try:
+            self.validate_constraints(exclude=list(errors))
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        if errors:
+            raise ValidationError(errors)
+
+    def _clean_rules(self, fields: Collection[str] | None) -> None:
+        """The model-level rules, for ``fields`` only, or all when None."""
+        errors: dict[str, str] = {}
+        name_changed = fields is None or "display_name" in fields
+        if name_changed and not _has_visible_character(self.display_name):
+            errors["display_name"] = "Enter a display name."
+        birth_changed = fields is None or not set(BIRTH_FIELDS).isdisjoint(fields)
+        if birth_changed and self._birth_month_is_in_the_future():
+            errors["birth_month"] = "The birth year and month cannot be in the future."
+        if errors:
+            raise ValidationError(errors)
+
+    def _birth_month_is_in_the_future(self) -> bool:
+        year, month = self.birth_year, self.birth_month
+        if not _is_int(year) or not _is_int(month):
+            # Field validation reports a missing or malformed value.
+            return False
+        today = timezone.localdate()
+        return (year, month) > (today.year, today.month)
+
+
+def normalize_input(name: str, value: object) -> object:
+    """``value`` for field ``name`` after the normalization validation applies.
+
+    None becomes "" for an optional text field, and text fields are
+    stripped. A profile change compares the result with the stored value
+    to tell whether a submitted field changed.
+    """
+    if value is None and name in OPTIONAL_TEXT_FIELDS:
+        return ""
+    if name in TEXT_FIELDS and isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _has_visible_character(value: object) -> bool:
+    """True when ``value`` has at least one character that renders.
+
+    That is a letter, number, punctuation mark, or symbol (L*, N*, P*,
+    S*), or a character unassigned in Python's Unicode data (Cn, which
+    holds newer scripts and emoji), other than a filler that renders
+    blank. Spaces, control and format characters, combining marks, and
+    private-use characters do not count on their own, though they may
+    appear next to one that does.
+    """
+    if not isinstance(value, str):
+        return False
+    return any(
+        unicodedata.category(char).startswith(_VISIBLE_CATEGORY_GROUPS)
+        and char not in _FILLERS
+        for char in value
+    )
+
+
+class PlayerPrivacy(models.Model):
+    """Who may see each of a Player's other profile details.
+
+    There is no setting for the display name or current Ratings: once
+    Ratings are published, every signed-in Account sees them (ADR 0002).
+    """
+
+    SETTINGS: ClassVar[tuple[str, ...]] = PRIVACY_SETTINGS
+
+    player = models.OneToOneField(
+        Player, on_delete=models.CASCADE, primary_key=True, related_name="privacy"
+    )
+    city_region_visibility = models.CharField(
+        max_length=16,
+        choices=Visibility,
+        default=Visibility.SIGNED_IN,
+        error_messages=_CHOICE_MESSAGES,
+    )
+    match_history_visibility = models.CharField(
+        max_length=16,
+        choices=Visibility,
+        default=Visibility.SIGNED_IN,
+        error_messages=_CHOICE_MESSAGES,
+    )
+    rating_history_visibility = models.CharField(
+        max_length=16,
+        choices=Visibility,
+        default=Visibility.SIGNED_IN,
+        error_messages=_CHOICE_MESSAGES,
+    )
+    stats_visibility = models.CharField(
+        max_length=16,
+        choices=Visibility,
+        default=Visibility.SIGNED_IN,
+        error_messages=_CHOICE_MESSAGES,
+    )
+    home_club_visibility = models.CharField(
+        max_length=16,
+        choices=Visibility,
+        default=Visibility.SIGNED_IN,
+        error_messages=_CHOICE_MESSAGES,
+    )
+
+    class Meta:
+        verbose_name = "player privacy settings"
+        verbose_name_plural = "player privacy settings"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=Q(**{f"{name}__in": Visibility.values}),
+                name=f"players_playerprivacy_{name}_valid",
+            )
+            for name in PRIVACY_SETTINGS
+        ]
+
+    def __str__(self) -> str:
+        # The OPEN Code, never a name (ADR 0009).
+        return self.player.public_code
+
+    def visible_to(self, setting: str, viewer: "_User | AnonymousUser | None") -> bool:
+        """True when ``viewer`` may see the detail ``setting`` covers.
+
+        Nobody signed out or inactive sees anything. The player's own
+        Account always does. Another Account does only at ``SIGNED_IN``,
+        and only while the player's Account is active: ADR 0002 shows a
+        Player's name only then, so its other details must not outlast it.
+        """
+        if setting not in self.SETTINGS:
+            raise ValueError(f"{setting} is not a privacy setting.")
+        if viewer is None or not viewer.is_authenticated or not viewer.is_active:
+            return False
+        if viewer.pk == self.player.account_id:
+            return True
+        if not self.player.account.is_active:
+            return False
+        return bool(getattr(self, setting) == Visibility.SIGNED_IN)

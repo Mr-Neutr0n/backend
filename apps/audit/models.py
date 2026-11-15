@@ -36,6 +36,8 @@ class AuditAction(models.TextChoices):
     OAUTH_APP_APPROVE = "oauth_app.approve", "OAuth application approval"
     OAUTH_APP_REJECT = "oauth_app.reject", "OAuth application rejection"
     OAUTH_APP_REVOKE = "oauth_app.revoke", "OAuth application revocation"
+    PRIVACY_CHANGE = "privacy.change", "Privacy setting change"
+    PLAYER_PROFILE_CHANGE = "player.profile_change", "Player profile change"
 
 
 class AuditEventImmutable(RuntimeError):
