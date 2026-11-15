@@ -77,6 +77,7 @@ _EXTERNAL_ID_TAKEN = "This application already submitted a match with this exter
 _PLAYED_AT_NEEDS_OFFSET = "Give the venue's UTC offset with the time played."
 _OFFSET_NEEDS_PLAYED_AT = "Give the time played with the venue's UTC offset."
 _PLAYED_AT_NAIVE = "Give the time played with its time zone."
+_PLAYED_AT_OUT_OF_RANGE = "Enter a time played within the supported dates."
 _LOCAL_DATE = "The date played must be the local date of the time played."
 
 # played_at shifted to the venue's local time, as a date. Postgres keeps a
@@ -332,9 +333,13 @@ class Match(_CleanedTextModel):
             and isinstance(self.played_on, datetime.date)
             and not isinstance(self.played_on, datetime.datetime)
         ):
-            local = played_at.astimezone(UTC) + timedelta(minutes=offset)
-            if local.date() != self.played_on:
-                errors["played_on"] = _LOCAL_DATE
+            try:
+                local = played_at.astimezone(UTC) + timedelta(minutes=offset)
+            except OverflowError:
+                errors["played_at"] = _PLAYED_AT_OUT_OF_RANGE
+            else:
+                if local.date() != self.played_on:
+                    errors["played_on"] = _LOCAL_DATE
         if errors:
             raise ValidationError(errors)
 
