@@ -8,7 +8,7 @@ security-sensitive (CLAUDE.md, hard rule 8): ``approved_at`` and
 approval service #29 adds.
 """
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from typing import Any, ClassVar, NoReturn, Self
 
 from django.conf import settings
@@ -111,6 +111,23 @@ class PartnerApplication(AbstractApplication):
         instance._stored_client_secret = instance.__dict__.get("client_secret")
         return instance
 
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[Self] | None = None,
+    ) -> None:
+        """Reload, and record a reloaded client secret as the stored one.
+
+        Reading a deferred field also comes through here.
+        """
+        names = None if fields is None else list(fields)
+        super().refresh_from_db(using=using, fields=names, from_queryset=from_queryset)
+        if (names is None or "client_secret" in names) and (
+            "client_secret" not in self.get_deferred_fields()
+        ):
+            self._stored_client_secret = self.client_secret
+
     def _raw_secret_error(self) -> str | None:
         """The reason a new or changed client secret is refused, or None.
 
@@ -154,7 +171,9 @@ class PartnerApplication(AbstractApplication):
         except ``approved_at`` and ``approved_by``, so an instance loaded
         before an approval change cannot write the old status back. A new
         application must start unapproved, so a copy of an approved one is
-        refused before any write.
+        refused before any write. A copy (``pk = None``,
+        ``_state.adding = True``) needs a new raw secret, since the loaded
+        hash is refused as hash-shaped.
 
         A new or changed client secret that is blank or looks like a
         password hash is refused before any write (see
