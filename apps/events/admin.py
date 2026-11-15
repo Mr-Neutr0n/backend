@@ -1,6 +1,6 @@
 """Admin for Events."""
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django import forms
 from django.contrib import admin
@@ -27,6 +27,19 @@ class EventAdminForm(forms.ModelForm[Event]):
             "weight",
         )
         error_messages: ClassVar[dict[str, dict[str, str]]] = {"kind": CHOICE_MESSAGES}
+
+    def clean(self) -> dict[str, Any] | None:
+        """Clear each date that failed on the instance before it is checked.
+
+        The form leaves a field that failed at its stored value, and the
+        model's ``clean()`` still runs, so its order check would compare
+        the other new date with the stored one and report a false error.
+        """
+        cleaned_data = super().clean()
+        for name in ("start_date", "end_date"):
+            if self.has_error(name):
+                setattr(self.instance, name, None)
+        return cleaned_data
 
 
 @admin.register(Event)
