@@ -5,7 +5,8 @@ verify and unverify actions, which call ``apps.clubs.services`` and are
 shown only to Accounts with ``clubs.verify_organizer``.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from django.contrib import admin, messages
 from django.db.models import QuerySet
@@ -49,6 +50,27 @@ class OrganizerAdmin(admin.ModelAdmin[Organizer]):
     search_fields = ("public_code", "name")
     inlines = (OrganizerMemberInline,)
     actions = ("verify_selected", "unverify_selected")
+
+    def get_deleted_objects(
+        self, objs: Sequence[Organizer] | QuerySet[Organizer], request: HttpRequest
+    ) -> tuple[list[Any], dict[str, int], set[str], list[Any]]:
+        """Mark every verified Organizer as protected.
+
+        The delete view and ``delete_selected`` then show "Cannot delete"
+        and delete, log, and report nothing. Unverify it first: that
+        records an Audit Event, which a delete would not.
+        """
+        to_delete, model_count, perms_needed, protected = super().get_deleted_objects(
+            objs, request
+        )
+        protected = list(protected)
+        for organizer in objs:
+            if organizer.is_verified:
+                # The OPEN Code only: the name may be a person's.
+                protected.append(
+                    f"Organizer {organizer.public_code} is verified: unverify it first."
+                )
+        return to_delete, model_count, perms_needed, protected
 
     def has_verify_permission(self, request: HttpRequest) -> bool:
         """Django shows an action marked ``permissions=["verify"]`` only

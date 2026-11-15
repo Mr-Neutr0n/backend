@@ -25,6 +25,7 @@ _CONTROL_CHARACTER = "Remove control or invalid characters."
 _NOT_TEXT = "Enter text."
 # Written only by apps.clubs.services.
 VERIFICATION_FIELDS = ("verified_at", "verified_by")
+VERIFIED_DELETE_MESSAGE = "A verified organizer cannot be deleted: unverify it first."
 # Control characters (Postgres cannot store NUL) and lone surrogates
 # (not encodable as UTF-8).
 _REFUSED_CATEGORIES = frozenset({"Cc", "Cs"})
@@ -179,6 +180,17 @@ class Organizer(_CleanedTextModel):
                 and field.name not in VERIFICATION_FIELDS
             ]
         super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        """Delete an unverified Organizer. A verified one is refused.
+
+        Deleting would drop the verification with no Audit Event, so
+        unverify it first through the services, which records one.
+        ``QuerySet.delete()`` skips this check, like any other raw write.
+        """
+        if self.is_verified:
+            raise ValueError(VERIFIED_DELETE_MESSAGE)
+        return super().delete(*args, **kwargs)
 
 
 class OrganizerMember(models.Model):
