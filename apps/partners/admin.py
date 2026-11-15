@@ -41,6 +41,8 @@ class PartnerApplicationAdmin(ApplicationAdmin):
     )
     list_select_related = ("organizer",)
     raw_id_fields = ("user", "organizer")
+    # No public page (PartnerApplication.get_absolute_url).
+    view_on_site = False
     readonly_fields = (
         "registration_source",
         "cimd_expires_at",

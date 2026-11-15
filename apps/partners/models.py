@@ -9,7 +9,7 @@ approval service #29 adds.
 """
 
 from collections.abc import Collection
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, NoReturn, Self
 
 from django.conf import settings
 from django.contrib.auth.hashers import identify_hasher
@@ -86,6 +86,16 @@ class PartnerApplication(AbstractApplication):
     @property
     def is_approved(self) -> bool:
         return self.approved_at is not None
+
+    @property
+    def get_absolute_url(self) -> NoReturn:
+        """Absent: a partner application has no page outside the admin.
+
+        DOT's version reverses its application detail view, which OPEN
+        does not mount. Raising AttributeError makes ``hasattr`` false, so
+        the admin's ``/admin/r/`` shortcut answers 404, not a 500.
+        """
+        raise AttributeError("A partner application has no page.")
 
     @classmethod
     def from_db(
