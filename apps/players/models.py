@@ -44,6 +44,11 @@ _VISIBLE_CATEGORY_GROUPS = ("L", "N", "P", "S", "Cn")
 TEXT_FIELDS = ("display_name", "legal_name", "city", "region")
 # Optional text fields where None means cleared, stored as "".
 OPTIONAL_TEXT_FIELDS = ("legal_name", "gender_division", "city", "region")
+# Fields that take only text (or None). Django's own conversion calls
+# str(), which turns any value into text and raises ValueError on an int
+# past Python's digit limit.
+STRING_FIELDS = (*TEXT_FIELDS, "gender_division")
+_NOT_TEXT = "Enter text."
 BIRTH_FIELDS = ("birth_year", "birth_month")
 
 EARLIEST_BIRTH_YEAR = 1900
@@ -136,7 +141,8 @@ class Player(PublicCodeModel):
     def clean_fields(self, exclude: Collection[str] | None = None) -> None:
         """Normalize and check the input before Django's field validation.
 
-        None clears an optional text field. Text is stripped first, so
+        None clears an optional text field. A text field refuses a value
+        that is not a string (None aside). Text is stripped first, so
         max_length counts the stored value. Control characters and
         lone surrogates are refused: Postgres cannot store NUL, and a
         surrogate cannot be encoded. Birth year and month
@@ -148,9 +154,13 @@ class Player(PublicCodeModel):
         for name in OPTIONAL_TEXT_FIELDS:
             if name not in skip and getattr(self, name) is None:
                 setattr(self, name, "")
+        for name in STRING_FIELDS:
+            value = getattr(self, name)
+            if name not in skip and value is not None and not isinstance(value, str):
+                errors[name] = [ValidationError(_NOT_TEXT)]
         for name in TEXT_FIELDS:
             value = getattr(self, name)
-            if name in skip or not isinstance(value, str):
+            if name in skip or name in errors or not isinstance(value, str):
                 continue
             value = value.strip()
             setattr(self, name, value)

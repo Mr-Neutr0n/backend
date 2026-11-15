@@ -112,6 +112,17 @@ def _refuse_unknown(keys: Iterable[object], allowed: tuple[str, ...]) -> None:
         raise ValueError("Not a field that can be changed.")
 
 
+def _is_unchanged(name: str, value: object, stored: object) -> bool:
+    """True when a submitted profile value matches the stored one.
+
+    It matches as submitted, or once both are normalized, so a stored
+    padded value resent as is or stripped is unchanged too.
+    """
+    if value == stored:
+        return True
+    return normalize_input(name, value) == normalize_input(name, stored)
+
+
 def update_profile(
     *,
     player: Player,
@@ -130,15 +141,15 @@ def update_profile(
     with transaction.atomic():
         locked = _lock_own_player(player, actor)
         old = {name: getattr(locked, name) for name in PROFILE_FIELDS}
-        # A submitted value equal to the stored one after normalization is
-        # unchanged: not validated, saved, or listed. So a client that
-        # resends the whole profile is not blocked by a stored value a later
-        # rule refuses, and an equal value of another type (1990.0) is
-        # never written.
+        # A submitted value equal to the stored one (as is, or both
+        # normalized) is unchanged: not validated, saved, or listed. So a
+        # client that resends the whole profile is not blocked by a stored
+        # value a later rule refuses, and an equal value of another type
+        # (1990.0) is never written.
         submitted = {
             name: value
             for name, value in changes.items()
-            if normalize_input(name, value) != old[name]
+            if not _is_unchanged(name, value, old[name])
         }
         for name, value in submitted.items():
             setattr(locked, name, value)
