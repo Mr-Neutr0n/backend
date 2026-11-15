@@ -21,11 +21,12 @@ is no Event (decision F1 in #1).
 """
 
 import datetime
+from collections.abc import Collection
 from datetime import UTC, timedelta
 from typing import ClassVar
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import (
@@ -99,6 +100,42 @@ _LOCAL_PLAYED_ON = Cast(
 )
 
 
+class _LinkMessagesModel(models.Model):
+    """Gives each link's own ``invalid`` message for an id of the wrong type.
+
+    ``ForeignKey.to_python`` converts the id with the target's primary key
+    field, whose message repeats the submitted value (CLAUDE.md, API).
+    """
+
+    class Meta:
+        abstract = True
+
+    def clean_fields(self, exclude: Collection[str] | None = None) -> None:
+        try:
+            super().clean_fields(exclude=exclude)
+        except ValidationError as error:
+            errors: dict[str, list[ValidationError]] = {}
+            for name, field_errors in error.error_dict.items():
+                field = _foreign_key(self, name)
+                errors[name] = [
+                    ValidationError(field.error_messages["invalid"], code="invalid")
+                    if field is not None and item.code == "invalid"
+                    else item
+                    for item in field_errors
+                ]
+            raise ValidationError(errors) from None
+
+
+def _foreign_key(
+    instance: models.Model, name: str
+) -> models.ForeignKey[models.Model, models.Model] | None:
+    try:
+        field = instance._meta.get_field(name)
+    except FieldDoesNotExist:
+        return None
+    return field if isinstance(field, models.ForeignKey) else None
+
+
 class MatchFormat(models.TextChoices):
     """Singles or doubles. The values are ``open_engine.MatchFormat``'s."""
 
@@ -145,7 +182,7 @@ class Team(models.TextChoices):
     B = "B", "Team B"
 
 
-class Match(_CleanedTextModel):
+class Match(_LinkMessagesModel, _CleanedTextModel):
     """One match in the ledger (CONTEXT.md, Match).
 
     Exactly one of ``submitted_by_user`` and ``submitted_by_application`` is
@@ -344,7 +381,7 @@ class Match(_CleanedTextModel):
             raise ValidationError(errors)
 
 
-class MatchParticipant(models.Model):
+class MatchParticipant(_LinkMessagesModel):
     """A Player on one team of a Match. A Player plays once per Match."""
 
     match = models.ForeignKey(
@@ -379,7 +416,7 @@ class MatchParticipant(models.Model):
         return f"{self.match.public_code} team {self.team}"
 
 
-class Game(models.Model):
+class Game(_LinkMessagesModel):
     """One game of a Match, numbered from 1. Scores are never negative."""
 
     match = models.ForeignKey(
