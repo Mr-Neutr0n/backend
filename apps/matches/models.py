@@ -60,6 +60,26 @@ MAX_GAMES = 5
 MIN_UTC_OFFSET_MINUTES = -720
 MAX_UTC_OFFSET_MINUTES = 840
 
+# Every character Python's str.isspace() is true for, so the database check
+# agrees with the model's str.strip(). Postgres \s depends on the database
+# locale and misses some of them. Listed one by one, since a bracket range
+# may depend on the collation.
+WHITESPACE_CODE_POINTS: tuple[int, ...] = (
+    *range(0x0009, 0x000D + 1),
+    *range(0x001C, 0x001F + 1),
+    0x0020,
+    0x0085,
+    0x00A0,
+    0x1680,
+    *range(0x2000, 0x200A + 1),
+    0x2028,
+    0x2029,
+    0x202F,
+    0x205F,
+    0x3000,
+)
+_WHITESPACE_CLASS = "[" + "".join(chr(point) for point in WHITESPACE_CODE_POINTS) + "]"
+
 # Messages never include the submitted value (CLAUDE.md, API). Django's
 # defaults for these keys do.
 _NUMBER_MESSAGES = {"invalid": "Enter a whole number."}
@@ -364,7 +384,9 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
             ),
             models.CheckConstraint(
                 # Raw writes skip the model's stripping.
-                condition=~Q(external_id__regex=r"^\s|\s$"),
+                condition=~Q(
+                    external_id__regex=f"^{_WHITESPACE_CLASS}|{_WHITESPACE_CLASS}$"
+                ),
                 name="matches_match_external_id_trimmed",
             ),
             models.UniqueConstraint(
