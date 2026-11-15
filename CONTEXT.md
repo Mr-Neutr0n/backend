@@ -5,7 +5,7 @@ The shared vocabulary for this repository. Use these terms in models, endpoints,
 ## People and accounts
 
 **Player**:
-A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. Once Ratings are published, the display name and current Ratings of a Player whose Account is active are always visible to every signed-in Account, and the Player cannot hide them. Authenticated partner applications see them too, except for players aged 13 to 17 (ADR 0009). There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`.
+A person who plays matches and has ratings. Every Player is created by one Account and belongs to it. Deleting the Account (#116) keeps the Player and its Matches. Once Ratings are published, the display name and current Ratings of a Player whose Account is active are always visible to every signed-in Account, and the Player cannot hide them. Authenticated partner applications see them too, except for players aged 13 to 17 (ADR 0009). There are no unclaimed Player records, and no Submission creates a Player (ADR 0002). Engine: `Player`. Backend: `players.Player`.
 _Avoid_: user, member, athlete.
 
 **Account**:
@@ -17,12 +17,16 @@ The name a Player shows to others. As ADR 0002 sets out, once Ratings are publis
 _Avoid_: username, nickname.
 
 **Legal Name**:
-A Player's full legal name, private, used only for identity checks and Organizer verification. Encrypted, and never returned to Partners (ADR 0009).
+A Player's full legal name, private, used only for identity checks and Organizer verification. Encrypted once #115 lands, and never returned to Partners (ADR 0009).
 _Avoid_: real name.
 
 **Age Group**:
 A band derived from a Player's birth year and month, shown in their place. OPEN stores birth year and month, never the day, and applies age limits as if the player were born on the last day of the month (ADR 0009).
 _Avoid_: age, birthdate.
+
+**Privacy Setting**:
+A Player's choice of who sees one of their other profile details (city and region, match history, rating history, stats, home club): every active signed-in Account, or only the player. While the player's own Account is inactive, nobody sees them. Display Name and current Ratings have no Privacy Setting (ADR 0002). Backend: the `*_visibility` fields of `players.PlayerPrivacy`.
+_Avoid_: visibility flag, opt-out.
 
 **Gender Division**:
 The gender division a Player enters for divisions and gender-specific Rating Formats: men's, women's, or none. OPEN stores no other gender data (ADR 0009).
@@ -116,7 +120,7 @@ Running the engine on real results without publishing or relying on its Ratings.
 ## Records
 
 **Audit Event**:
-One recorded sensitive action: who did it (an Account, or nobody), what it changed (the target), the values before and after, and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, privacy changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
+One recorded sensitive action: who did it (an Account, or nobody), what it changed (the target), the values before and after (for an identifying personal data field, only its name, ADR 0009), and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, privacy changes, a player's own profile changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
 _Avoid_: log entry (Django's admin `LogEntry` is a different thing), history.
 
 ## Governance terms

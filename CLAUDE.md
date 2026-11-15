@@ -14,7 +14,7 @@ Planned services, from the project roadmap:
 
 ## Current status
 
-The Django project scaffold exists (`config`, with settings read from the environment, plus `apps/accounts` with the custom email-login user model and the first migration, `apps/audit` with the append-only audit log (`AuditEvent`, `record_event`), `apps/public_ids` with OPEN Codes (`PublicCodeModel`, the `IssuedCode` registry, the `PublicCodePath` path parameter), `config/api.py` with the django-ninja API mounted at `/api/v1/` with the health checks in `config/health.py` as its only operations so far, the Celery app in `config/celery.py`, configured in the Celery section of `config/settings.py` (four queues, django-celery-beat), static files through WhiteNoise, CORS for `/api/` through django-cors-headers, `gunicorn.conf.py` for serving, and `compose.yaml` for local services), and no OPEN rating is live. The work is planned as GitHub issues grouped into outcome milestones (v0.1 MVP through v0.4), epics with sub-issues, native blocked-by links, and the "OPEN backend" org project board. Issue #1 records the plan's decisions and open questions; other issues cite them as "decisions Qn" or "Fn". Read the relevant ones before starting an issue.
+The Django project scaffold exists (`config`, with settings read from the environment, plus `apps/accounts` with the custom email-login user model and the first migration, `apps/audit` with the append-only audit log (`AuditEvent`, `record_event`), `apps/public_ids` with OPEN Codes (`PublicCodeModel`, the `IssuedCode` registry, the `PublicCodePath` path parameter), `apps/players` with `Player` and `PlayerPrivacy` and their services (no API, no admin), `config/api.py` with the django-ninja API mounted at `/api/v1/` with the health checks in `config/health.py` as its only operations so far, the Celery app in `config/celery.py`, configured in the Celery section of `config/settings.py` (four queues, django-celery-beat), static files through WhiteNoise, CORS for `/api/` through django-cors-headers, `gunicorn.conf.py` for serving, and `compose.yaml` for local services), and no OPEN rating is live. The work is planned as GitHub issues grouped into outcome milestones (v0.1 MVP through v0.4), epics with sub-issues, native blocked-by links, and the "OPEN backend" org project board. Issue #1 records the plan's decisions and open questions; other issues cite them as "decisions Qn" or "Fn". Read the relevant ones before starting an issue.
 
 ## Stack (decided, see issue #1)
 
@@ -48,6 +48,14 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - A new action type is a new `AuditAction` value plus its generated migration. The issue that adds a feature records that feature's events, with a test.
 - `flush` (and so the teardown of a transactional test) fails once the audit table has a row. Tests that record events should run in a transaction that rolls back (the default `django_db` mark).
 - `actor_user` and `target_content_type` use `PROTECT`: an Account that has acted cannot be hard-deleted (deactivate it instead), and a content type an event points at cannot be removed. Plan account deletion around this.
+
+## Players
+
+- Create a Player only through `apps.players.services.create_player()`, which also creates its `PlayerPrivacy` row. Change profile fields only through `update_profile()` and privacy settings only through `update_privacy()`. Both refuse any actor but the Player's own active Account, and record one Audit Event when a value changes.
+- A profile change records only the changed field names, never a value (ADR 0009). A privacy change records the old and new levels of the changed settings.
+- `Player.account` uses `PROTECT`, so an Account with a Player cannot be hard-deleted. #116 decides what Account deletion does with it.
+- In tests, build Players with `PlayerFactory` (`apps/players/tests/factories.py`), which goes through `create_player()`. A raw `Player.objects.create()` has no `PlayerPrivacy` row.
+- The Player fields are the ones ADR 0009 allows. Adding a personal data field updates `docs/privacy/personal-data-inventory.md` in the same pull request.
 
 ## Public identifiers
 
