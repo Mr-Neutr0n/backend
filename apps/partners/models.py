@@ -105,12 +105,14 @@ class PartnerApplication(AbstractApplication):
         raise AttributeError("A partner application has no page.")
 
     def _keeps_stored_secret(self) -> bool:
-        """True when a full save leaves ``client_secret`` out.
+        """True when a save of this row leaves ``client_secret`` out.
 
-        The stored secret is never rewritten. On an existing row a full
-        save skips it when it is deferred or when the value in memory is
-        hash-shaped: the loaded hash, or anything that looks like one. A
-        value that is not hash-shaped is a new raw secret and is written.
+        The stored secret is never rewritten. On an existing row a save
+        that would write it (a full save, or ``update_fields`` naming it,
+        as ``update_or_create`` does) skips it when it is deferred or when
+        the value in memory is hash-shaped: the loaded hash, or anything
+        that looks like one. A value that is not hash-shaped is a new raw
+        secret and is written.
         """
         if self._state.adding:
             return False
@@ -158,12 +160,14 @@ class PartnerApplication(AbstractApplication):
         application must start unapproved, so a copy of an approved one is
         refused before any write.
 
-        The stored client secret is never rewritten: a full save of an
-        existing row leaves it out when it is deferred or hash-shaped
-        (see ``_keeps_stored_secret``). Any other write of it (a new
-        application, a full save with a new value, an explicit
-        ``update_fields`` naming it) must be a raw secret, or is refused
-        before any write (see ``_raw_secret_error``). ``QuerySet.update``,
+        The stored client secret is never rewritten: a save of an existing
+        row leaves it out when it is deferred or hash-shaped (see
+        ``_keeps_stored_secret``), whether the save is a full one or names
+        it in ``update_fields`` (``update_or_create`` always does). So a
+        hash-shaped value given as a rotation is silently not written. Any
+        other write of it (a new application, a new non-hash value) must
+        be a raw secret, or is refused before any write (see
+        ``_raw_secret_error``). ``QuerySet.update``,
         ``bulk_create``, ``bulk_update``, ``loaddata``, and raw SQL skip
         that check; the database still refuses a blank secret.
 
@@ -181,8 +185,15 @@ class PartnerApplication(AbstractApplication):
                 "A new partner application starts unapproved: approve it "
                 "through the approval service."
             )
-        keep_secret = update_fields is None and self._keeps_stored_secret()
-        writes_secret = update_fields is None or "client_secret" in update_fields
+        names_secret = update_fields is not None and "client_secret" in update_fields
+        writes_secret = update_fields is None or names_secret
+        keep_secret = writes_secret and self._keeps_stored_secret()
+        if update_fields is not None and names_secret and keep_secret:
+            # update_or_create names every field with its own pre_save,
+            # client_secret included: the stored hash stays as it is.
+            kwargs["update_fields"] = [
+                name for name in update_fields if name != "client_secret"
+            ]
         if writes_secret and not keep_secret:
             reason = self._raw_secret_error()
             if reason is not None:
