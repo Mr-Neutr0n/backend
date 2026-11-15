@@ -62,7 +62,7 @@ A Club's permission for one Partner Application to submit that Club's matches (#
 _Avoid_: authorization, consent (that is a player's approval of a linked app, #76).
 
 **External ID**:
-A Player's identifier in another system, keyed by source. Used for identity matching, never as the OPEN primary key. Engine: `Player.external_ids`.
+A Player's identifier in another system, keyed by source. Used for identity matching, never as the OPEN primary key. Not the same as a Match's `external_id` (see Match). Engine: `Player.external_ids`.
 
 **OPEN Code**:
 The public identifier OPEN issues to a Player, Club, Event, Organizer, or Match, such as `P-7K3M-QX9H`. A type prefix, random characters, and a check character. It never changes and is never issued again. APIs, exports, and URLs use it; row ids never appear in the API. An External ID comes from another system and is only used for matching; an OPEN Code is OPEN's own. Backend: `public_code`, `public_ids.PublicCodeModel` (ADR 0008).
@@ -71,14 +71,14 @@ _Avoid_: OPEN ID, player ID, row id.
 ## Matches and results
 
 **Match**:
-One completed contest between two teams, with one or more game scores. Singles teams have one player; doubles teams have two. Every Match has a `match_id` unique to its source, used for duplicate protection. Engine: `Match`.
+One completed contest between two teams, with one or more game scores. Singles teams have one player; doubles teams have two. The engine needs a `match_id` unique to its source, used for duplicate protection; #44 decides which backend field supplies it. A Partner Application's own identifier for a Match is the Match's `external_id`, unique per application; a Match an Account submitted has none. Engine: `Match`. Backend: `matches.Match`, with its players in `matches.MatchParticipant`.
 _Avoid_: game (a game is one scored unit inside a Match), result.
 
 **Game**:
-One scored unit inside a Match, such as 11-8. Must be valid for the Match's Game Format. Engine: `Match.games`.
+One scored unit inside a Match, such as 11-8. Must be valid for the Match's Game Format. A Match has 1 to 5 Games. Engine: `Match.games`. Backend: `matches.Game`.
 
 **Game Format**:
-How each game is scored: side-out or rally scoring, points to win, win-by margin, and an optional cap. Recorded on every Match. Engine: `GameFormat`.
+How each game is scored: side-out or rally scoring, points to win, win-by margin, and an optional cap. Recorded on every Match. The backend stores the scoring type (`scoring_type`, side-out by default) and points to win (`game_target`: 11, 15, or 21); every game in a Match uses the same ones (decision F15). Engine: `GameFormat`.
 
 **Match Type**:
 Where the result came from, which affects its weight: `tournament`, `league`, `rec_verified`, or `self_reported`. Engine: `MatchType`.
@@ -94,7 +94,7 @@ _Avoid_: upload (an upload is a batch of Submissions).
 A Match held for Organizer review because it looks like an outlier, a possible duplicate, or otherwise suspicious.
 
 **Ledger**:
-The append-only, ordered record of every counted Match. Order is date, time, sequence, then `match_id`. The Ledger is the source of truth for ratings. Engine: `ledger_order`.
+The append-only, ordered record of every counted Match. Order is date, time, sequence, then `match_id`. The Ledger is the source of truth for ratings. Engine: `ledger_order`. Backend: `played_on`, `played_at` with `played_at_utc_offset`, and `sequence` on `matches.Match`.
 _Avoid_: history table, log.
 
 ## Ratings
