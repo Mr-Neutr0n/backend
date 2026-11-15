@@ -28,7 +28,14 @@ if TYPE_CHECKING:
 _CHOICE_MESSAGES = {"invalid_choice": "Choose one of the listed options."}
 _WHOLE_NUMBER = "Enter a whole number."
 _INTEGER_MESSAGES = {"invalid": _WHOLE_NUMBER}
-_CONTROL_CHARACTER = "Remove control characters."
+_CONTROL_CHARACTER = "Remove control or invalid characters."
+# Control characters (Postgres cannot store NUL) and lone surrogates
+# (not encodable as UTF-8).
+_REFUSED_CATEGORIES = frozenset({"Cc", "Cs"})
+# Letters and symbols that render blank.
+_FILLERS = frozenset({"\u115f", "\u1160", "\u3164", "\uffa0", "\u2800"})
+# Letters, numbers, punctuation, and symbols.
+_VISIBLE_CATEGORY_GROUPS = ("L", "N", "P", "S")
 
 # Text fields stripped and checked for control characters before field
 # validation, so max_length counts the stored value.
@@ -128,8 +135,9 @@ class Player(PublicCodeModel):
         """Normalize and check the input before Django's field validation.
 
         None clears an optional text field. Text is stripped first, so
-        max_length counts the stored value. Control characters are
-        refused, since Postgres cannot store NUL. Birth year and month
+        max_length counts the stored value. Control characters and
+        lone surrogates are refused: Postgres cannot store NUL, and a
+        surrogate cannot be encoded. Birth year and month
         must be real ints: Django's own conversion would truncate a float,
         accept a bool, or overflow on infinity.
         """
@@ -144,7 +152,7 @@ class Player(PublicCodeModel):
                 continue
             value = value.strip()
             setattr(self, name, value)
-            if any(unicodedata.category(char) == "Cc" for char in value):
+            if any(unicodedata.category(char) in _REFUSED_CATEGORIES for char in value):
                 errors[name] = [ValidationError(_CONTROL_CHARACTER)]
         for name in BIRTH_FIELDS:
             value = getattr(self, name)
@@ -182,16 +190,20 @@ def _is_int(value: object) -> bool:
 
 
 def _has_visible_character(value: object) -> bool:
-    """True when ``value`` has a character other than spacing or format ones.
+    """True when ``value`` has at least one character that renders.
 
-    Spaces and separators (Z*), control characters (Cc), and format
-    characters such as a zero-width space (Cf) do not count.
+    That is a letter, number, punctuation mark, or symbol (L*, N*, P*,
+    S*) other than a filler that renders blank. Spaces, control and
+    format characters, combining marks, private-use, and unassigned
+    characters do not count on their own, though they may appear next to
+    one that does.
     """
     if not isinstance(value, str):
         return False
     return any(
-        not category.startswith("Z") and category not in {"Cc", "Cf"}
-        for category in map(unicodedata.category, value)
+        unicodedata.category(char).startswith(_VISIBLE_CATEGORY_GROUPS)
+        and char not in _FILLERS
+        for char in value
     )
 
 
