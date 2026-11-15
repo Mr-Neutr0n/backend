@@ -8,15 +8,23 @@ security-sensitive (CLAUDE.md, hard rule 8): ``approved_at`` and
 approval service #29 adds.
 """
 
-from typing import Any, ClassVar
+from collections.abc import Collection
+from typing import Any, ClassVar, Self
 
 from django.conf import settings
+from django.contrib.auth.hashers import identify_hasher
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from oauth2_provider.models import AbstractApplication
 
 # Written only through update_fields, by the approval service (#29).
 APPROVAL_FIELDS = ("approved_at", "approved_by")
+# Messages never include the submitted value (CLAUDE.md, API).
+_BLANK_SECRET = "Enter a client secret."
+_HASH_SHAPED_SECRET = (
+    "Choose a client secret that does not look like a stored password hash."
+)
 
 
 class PartnerApplication(AbstractApplication):
@@ -49,6 +57,10 @@ class PartnerApplication(AbstractApplication):
     )
     is_sandbox = models.BooleanField(default=True)
 
+    # Not a field: the client_secret value loaded from the database (or
+    # last saved), so only a new or changed value is checked as raw.
+    _stored_client_secret: str | None = None
+
     class Meta(AbstractApplication.Meta):
         swappable = "OAUTH2_PROVIDER_APPLICATION_MODEL"
         constraints: ClassVar[list[models.BaseConstraint]] = [
@@ -61,6 +73,10 @@ class PartnerApplication(AbstractApplication):
                 condition=Q(hash_client_secret=True),
                 name="partners_application_secret_hashed",
             ),
+            models.CheckConstraint(
+                condition=~Q(client_secret=""),
+                name="partners_application_secret_not_blank",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -71,6 +87,56 @@ class PartnerApplication(AbstractApplication):
     def is_approved(self) -> bool:
         return self.approved_at is not None
 
+    @classmethod
+    def from_db(
+        cls,
+        db: str | None,
+        field_names: Collection[str],
+        values: Collection[Any],
+        **kwargs: Any,
+    ) -> Self:
+        # **kwargs: the stubs add Django 6's fetch_mode, which 5.2 lacks.
+        instance = super().from_db(db, field_names, values, **kwargs)
+        # Absent when the field is deferred.
+        instance._stored_client_secret = instance.__dict__.get("client_secret")
+        return instance
+
+    def _raw_secret_error(self) -> str | None:
+        """The reason a new or changed client secret is refused, or None.
+
+        A raw secret is hashed on save, so it must not be blank (the hash
+        of "" lets a client in with no secret) or look like a hash
+        (``ClientSecretField`` would store it as is, and DOT would then
+        compare the plaintext). The stored value, unchanged, is a hash and
+        is not checked. Neither is a deferred one.
+        """
+        if "client_secret" in self.get_deferred_fields():
+            return None
+        secret = self.client_secret
+        if not self._state.adding and secret == self._stored_client_secret:
+            return None
+        if not isinstance(secret, str) or not secret.strip():
+            return _BLANK_SECRET
+        try:
+            identify_hasher(secret)
+        except ValueError:
+            return None
+        return _HASH_SHAPED_SECRET
+
+    def clean_fields(self, exclude: Collection[str] | None = None) -> None:
+        skip = set(exclude or ())
+        errors: dict[str, list[ValidationError]] = {}
+        if "client_secret" not in skip:
+            reason = self._raw_secret_error()
+            if reason is not None:
+                errors["client_secret"] = [ValidationError(reason)]
+        try:
+            super().clean_fields(exclude=skip | set(errors))
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        if errors:
+            raise ValidationError(errors)
+
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Save, without writing approval on a full save.
 
@@ -80,18 +146,31 @@ class PartnerApplication(AbstractApplication):
         application must start unapproved, so a copy of an approved one is
         refused before any write.
 
-        An explicit ``update_fields`` naming either field writes it with no
-        actor check and no Audit Event, as do ``update_or_create`` with
-        either in ``defaults`` and every raw write (``QuerySet.update``,
-        ``bulk_update``, raw SQL). Only the approval service (#29) may.
+        A new or changed client secret that is blank or looks like a
+        password hash is refused before any write (see
+        ``_raw_secret_error``). ``QuerySet.update``, ``bulk_create``,
+        ``bulk_update``, ``loaddata``, and raw SQL skip that check; the
+        database still refuses a blank secret.
+
+        An explicit ``update_fields`` naming either approval field writes
+        it with no actor check and no Audit Event, as do
+        ``update_or_create`` with either in ``defaults`` and every raw
+        write (``QuerySet.update``, ``bulk_create``, ``bulk_update``,
+        ``loaddata``, raw SQL). Only the approval service (#29) may.
         """
-        if self._state.adding:
-            if self.approved_at is not None or self.approved_by_id is not None:
-                raise ValueError(
-                    "A new partner application starts unapproved: approve it "
-                    "through the approval service."
-                )
-        elif kwargs.get("update_fields") is None:
+        update_fields = kwargs.get("update_fields")
+        if self._state.adding and (
+            self.approved_at is not None or self.approved_by_id is not None
+        ):
+            raise ValueError(
+                "A new partner application starts unapproved: approve it "
+                "through the approval service."
+            )
+        if update_fields is None or "client_secret" in update_fields:
+            reason = self._raw_secret_error()
+            if reason is not None:
+                raise ValueError(f"The client secret is refused: {reason}")
+        if not self._state.adding and update_fields is None:
             deferred = self.get_deferred_fields()
             kwargs["update_fields"] = [
                 field.name
@@ -101,6 +180,9 @@ class PartnerApplication(AbstractApplication):
                 and field.name not in APPROVAL_FIELDS
             ]
         super().save(*args, **kwargs)
+        if "client_secret" not in self.get_deferred_fields():
+            # pre_save replaced a raw secret with its hash.
+            self._stored_client_secret = self.client_secret
 
 
 class ClubApplicationGrant(models.Model):
