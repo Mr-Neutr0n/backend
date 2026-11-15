@@ -135,10 +135,11 @@ def test_change_form_cannot_clear_verification(
     )
     url = reverse("admin:clubs_organizer_change", args=[organizer.pk])
 
-    superuser_client.post(
+    response = superuser_client.post(
         url, _organizer_change_data(organizer, verified_at="", verified_by="")
     )
 
+    assert response.status_code == 302
     organizer.refresh_from_db()
     assert organizer.verified_at == verified_at
     assert organizer.verified_by == superuser
