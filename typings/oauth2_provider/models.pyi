@@ -46,3 +46,6 @@ class AbstractApplication(models.Model):
     ]
 
     def clean(self) -> None: ...
+
+# The token models are not stubbed, so their model class is untyped.
+def get_access_token_model() -> Any: ...
