@@ -51,24 +51,28 @@ def _game_winners(best_of: int) -> list[str]:
 
 
 class MatchParticipantFactory(DjangoModelFactory[MatchParticipant]):
-    """A new Player on team A of a Match."""
+    """A new Player on team A of a new Match that has no other players."""
 
     class Meta:
         model = MatchParticipant
 
     # factory_boy's declarations carry no type hints.
-    match = SubFactory("apps.matches.tests.factories.MatchFactory")  # type: ignore[no-untyped-call]
+    match = SubFactory(
+        "apps.matches.tests.factories.MatchFactory", games=False, participants=False
+    )  # type: ignore[no-untyped-call]
     player = SubFactory(PlayerFactory)  # type: ignore[no-untyped-call]
     team = Team.A
 
 
 class GameFactory(DjangoModelFactory[Game]):
-    """Game 1 of a Match, won 11 to a lower score by team A."""
+    """Game 1 of a new Match that has no other games, won 11 by team A."""
 
     class Meta:
         model = Game
 
-    match = SubFactory("apps.matches.tests.factories.MatchFactory")  # type: ignore[no-untyped-call]
+    match = SubFactory(
+        "apps.matches.tests.factories.MatchFactory", games=False, participants=False
+    )  # type: ignore[no-untyped-call]
     game_number = 1
     team_a_score = GameTarget.ELEVEN
     team_b_score = LazyFunction(lambda: _faker.random_int(min=0, max=9))  # type: ignore[no-untyped-call]
@@ -81,7 +85,8 @@ class MatchFactory(DjangoModelFactory[Match]):
     game's winner reaches the target and the loser stays at least 2 behind.
     Traits: ``best_of_1``, ``best_of_3``, ``best_of_5``, ``side_out``,
     ``rally``, and ``by_application`` (a Partner Application submitted it,
-    with an external ID).
+    with an external ID). Pass ``games=False`` or ``participants=False``
+    to leave those out.
     """
 
     class Meta:
@@ -109,7 +114,7 @@ class MatchFactory(DjangoModelFactory[Match]):
 
     @post_generation  # type: ignore[untyped-decorator]
     def participants(self: Match, create: bool, extracted: Any, **kwargs: Any) -> None:
-        if not create:
+        if not create or extracted is False:
             return
         for team in Team:
             for _ in range(PLAYERS_PER_TEAM[MatchFormat(self.format)]):
@@ -117,7 +122,7 @@ class MatchFactory(DjangoModelFactory[Match]):
 
     @post_generation  # type: ignore[untyped-decorator]
     def games(self: Match, create: bool, extracted: Any, **kwargs: Any) -> None:
-        if not create:
+        if not create or extracted is False:
             return
         target = int(self.game_target)
         for number, winner in enumerate(_game_winners(int(self.best_of)), start=1):
