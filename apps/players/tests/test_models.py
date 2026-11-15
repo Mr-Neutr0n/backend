@@ -81,7 +81,7 @@ def test_player_belongs_to_its_account() -> None:
     player = _player(account)
 
     assert player.account == account
-    assert account.player == player  # type: ignore[attr-defined]
+    assert account.player == player
 
 
 def test_second_player_for_one_account_fails() -> None:
@@ -94,7 +94,7 @@ def test_second_player_for_one_account_fails() -> None:
 
 def test_player_needs_an_account() -> None:
     with pytest.raises(IntegrityError), transaction.atomic():
-        Player.objects.create(account=None, **_valid())
+        Player.objects.create(account=None, **_valid())  # type: ignore[misc]
 
 
 @pytest.mark.parametrize("field", ["birth_year", "birth_month"])
