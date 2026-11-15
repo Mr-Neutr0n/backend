@@ -74,6 +74,8 @@ ignore = ["E501"]
 python_version = "3.13"
 strict = true
 plugins = ["mypy_django_plugin.main"]
+# Local stubs for packages that ship none (typings/oauth2_provider).
+mypy_path = "typings"
 # Skip ignored directories such as .venv and .claude/worktrees.
 exclude_gitignore = true
 
@@ -88,7 +90,9 @@ module = ["django_celery_beat", "django_celery_beat.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# django-oauth-toolkit ships no type information.
+# django-oauth-toolkit ships no type information. typings/ stubs the
+# models module (so the swapped Application model is a typed model); its
+# other modules are untyped.
 module = ["oauth2_provider", "oauth2_provider.*"]
 ignore_missing_imports = true
 

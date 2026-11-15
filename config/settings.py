@@ -246,8 +246,9 @@ REDIS_URL = _redis_url(_required("REDIS_URL"))
 
 # First-party apps live under apps/ and are added as apps.<name>.
 # AUTH_USER_MODEL is fixed below and must not change once migrations exist.
-# The custom OAuth Application model (issue #22) must land before
-# django-oauth-toolkit's migrations are run.
+# django-oauth-toolkit's Application model is swapped for
+# partners.PartnerApplication (decision Q3). partners' first migration runs
+# before django-oauth-toolkit's, whose tables point at it.
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -258,16 +259,24 @@ INSTALLED_APPS = [
     "corsheaders",
     "ninja",
     "django_celery_beat",
+    "oauth2_provider",
     "apps.accounts",
     "apps.audit",
     "apps.public_ids",
     "apps.players",
     "apps.clubs",
     "apps.events",
+    # After oauth2_provider, so its admin module replaces the
+    # Application admin that oauth2_provider registers.
+    "apps.partners",
 ]
 
 # The OPEN Account login model, keyed on email (apps/accounts).
 AUTH_USER_MODEL = "accounts.User"
+
+# django-oauth-toolkit's Application, swapped for the OPEN one (decision
+# Q3). Fixed once migrations exist, like AUTH_USER_MODEL.
+OAUTH2_PROVIDER_APPLICATION_MODEL = "partners.PartnerApplication"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
