@@ -140,11 +140,15 @@ def test_new_match_is_pending_with_target_11_and_sequence_0(user: User) -> None:
     assert match.sequence == 0
 
 
-def test_choice_values_match_the_engine() -> None:
+def test_choice_values() -> None:
+    # Equal to open_engine.ScoringType's values.
     assert set(ScoringType.values) == {"side_out", "rally"}
+    # The two base values of open_engine.RatingFormat.
     assert set(MatchFormat.values) == {"singles", "doubles"}
+    # MatchStatus, BestOf, and Team have no engine enum.
     assert set(MatchStatus.values) == {"pending", "confirmed", "disputed", "voided"}
     assert set(BestOf.values) == {1, 3, 5}
+    # The points in the engine's ALL_GAME_FORMATS.
     assert set(GameTarget.values) == {11, 15, 21}
     assert set(Team.values) == {"A", "B"}
     assert MAX_GAMES == 5

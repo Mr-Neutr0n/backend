@@ -20,10 +20,14 @@ local date, external IDs unique per Partner Application, at most
 team size per format, games that decide the match) is #24, duplicate
 detection is #25, and confirmation and status changes are #26.
 
-The choice values equal the engine's values (``open_engine``), so #44 can
-map a Match to the engine's types without a lookup table. The match type is
-not stored: it comes from the Event's kind, or is self-reported when there
-is no Event (decision F1 in #1).
+``ScoringType`` values equal ``open_engine.ScoringType``'s and
+``GameTarget`` values equal the points in the engine's ``ALL_GAME_FORMATS``,
+so #44 maps them directly. ``MatchFormat`` holds only the two base values
+of ``open_engine.RatingFormat``: #44 derives the doubles categories (mixed,
+men's, women's) from the players. ``MatchStatus``, ``BestOf``, and ``Team``
+have no engine enum. The match type is not stored: it comes from the
+Event's kind, or is self-reported when there is no Event (decision F1 in
+#1).
 """
 
 import datetime
@@ -143,7 +147,12 @@ def _foreign_key(
 
 
 class MatchFormat(models.TextChoices):
-    """Singles or doubles. The values are ``open_engine.MatchFormat``'s."""
+    """Singles or doubles.
+
+    The values are the two base values of ``open_engine.RatingFormat``. The
+    engine's doubles categories (mixed, men's, women's) are not stored here:
+    #44 derives them from the players.
+    """
 
     SINGLES = "singles", "Singles"
     DOUBLES = "doubles", "Doubles"
@@ -174,7 +183,10 @@ class BestOf(models.IntegerChoices):
 
 
 class GameTarget(models.IntegerChoices):
-    """The points a game is played to: the engine's game formats (F15)."""
+    """The points a game is played to (decision F15 in #1).
+
+    The values are the points in the engine's ``ALL_GAME_FORMATS``.
+    """
 
     ELEVEN = 11, "11 points"
     FIFTEEN = 15, "15 points"
