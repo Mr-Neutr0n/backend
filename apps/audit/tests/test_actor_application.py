@@ -14,6 +14,8 @@ from apps.partners.tests.factories import PartnerApplicationFactory
 
 pytestmark = pytest.mark.django_db
 
+NOT_AN_APPLICATION = "The actor application is not a partner application."
+
 
 def test_record_event_stores_the_application() -> None:
     application = PartnerApplicationFactory.create()
@@ -101,11 +103,25 @@ def test_admin_shows_the_application_read_only(client: Client) -> None:
 def test_record_event_rejects_another_model_as_application() -> None:
     target = UserFactory.create()
 
-    with pytest.raises(ValueError, match="PartnerApplication"):
+    with pytest.raises(ValueError, match=NOT_AN_APPLICATION) as caught:
         record_event(
             action=AuditAction.RATING_EDIT,
             target=target,
             actor_application=target,  # type: ignore[arg-type]
+        )
+
+    assert target.email not in str(caught.value)
+    assert AuditEvent.objects.count() == 0
+
+
+def test_record_event_rejects_an_int_as_application() -> None:
+    application = PartnerApplicationFactory.create()
+
+    with pytest.raises(ValueError, match=NOT_AN_APPLICATION):
+        record_event(
+            action=AuditAction.RATING_EDIT,
+            target=UserFactory.create(),
+            actor_application=application.pk,  # type: ignore[arg-type]
         )
 
     assert AuditEvent.objects.count() == 0
