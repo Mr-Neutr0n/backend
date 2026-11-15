@@ -20,6 +20,10 @@ from oauth2_provider.models import AbstractApplication
 
 # Written only through update_fields, by the approval service (#29).
 APPROVAL_FIELDS = ("approved_at", "approved_by")
+_ALWAYS_INSERTED = (
+    "A new partner application is always inserted: it cannot be saved "
+    "with force_update or update_fields."
+)
 # Messages never include the submitted value (CLAUDE.md, API).
 _BLANK_SECRET = "Enter a client secret."
 _HASH_SHAPED_SECRET = (
@@ -158,9 +162,11 @@ class PartnerApplication(AbstractApplication):
         except ``approved_at`` and ``approved_by``, so an instance loaded
         before an approval change cannot write the old status back. A new
         application must start unapproved, so a copy of an approved one is
-        refused before any write. A new application is always inserted
-        (``force_insert``, even when ``asave()`` or a caller passes False),
-        so an instance built with an existing pk cannot overwrite that row.
+        refused before any write. A new application is always inserted:
+        ``force_insert`` is set even when ``asave()`` or a caller passes
+        False, and a truthy ``force_update`` or any ``update_fields`` is
+        refused before any write, so an instance built with an existing
+        pk cannot overwrite that row.
 
         The stored client secret is never rewritten: a save of an existing
         row leaves it out when it is deferred or hash-shaped (see
@@ -174,12 +180,20 @@ class PartnerApplication(AbstractApplication):
         that check; the database still refuses a blank secret.
 
         An explicit ``update_fields`` naming either approval field writes
-        it with no actor check and no Audit Event, as do
-        ``update_or_create`` with either in ``defaults`` and every raw
-        write (``QuerySet.update``, ``bulk_create``, ``bulk_update``,
-        ``loaddata``, raw SQL). Only the approval service (#29) may.
+        it with no actor check and no Audit Event, as does every raw write
+        (``QuerySet.update``, ``bulk_create``, ``bulk_update``,
+        ``loaddata``, raw SQL). ``update_or_create`` always names every
+        field that overrides ``pre_save``, ``approved_at`` included, but
+        writes the value it just loaded under ``select_for_update``, so it
+        changes approval only when ``defaults`` sets it. Only the approval
+        service (#29) may.
         """
         update_fields = kwargs.get("update_fields")
+        if self._state.adding and (
+            kwargs.get("force_update") or update_fields is not None
+        ):
+            # Either would UPDATE whatever row has this pk.
+            raise ValueError(_ALWAYS_INSERTED)
         if self._state.adding and (
             self.approved_at is not None or self.approved_by_id is not None
         ):
@@ -200,12 +214,12 @@ class PartnerApplication(AbstractApplication):
             reason = self._raw_secret_error()
             if reason is not None:
                 raise ValueError(f"The client secret is refused: {reason}")
-        if self._state.adding and update_fields is None:
+        if self._state.adding:
             # A new instance given an existing pk would otherwise UPDATE
             # that row, approval included. It fails on the pk instead.
             # asave() always passes force_insert=False, so a falsy value is
             # replaced; a truthy one (such as a tuple of parents) is kept.
-            if not kwargs.get("force_update") and not kwargs.get("force_insert"):
+            if not kwargs.get("force_insert"):
                 kwargs["force_insert"] = True
         elif update_fields is None:
             deferred = self.get_deferred_fields()
