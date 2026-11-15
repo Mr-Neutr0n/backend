@@ -8,9 +8,10 @@ identifying personal data fields (ADR 0009). A privacy change records the
 changed settings' levels.
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.db import transaction
 
@@ -42,27 +43,31 @@ def create_player(
     display_name: str,
     birth_year: int,
     birth_month: int,
-    legal_name: str = "",
-    gender_division: str = "",
-    city: str = "",
-    region: str = "",
+    legal_name: str | None = "",
+    gender_division: str | None = "",
+    city: str | None = "",
+    region: str | None = "",
 ) -> Player:
     """Create a Player for ``account``, with default privacy settings.
 
     Raises ``ValidationError`` for an invalid or missing value, or when the
-    Account already has a Player. Records no Audit Event: creating a
-    Player changes no privacy setting. The 13-and-older rule is #114.
+    Account already has a Player. None for an optional text field means
+    empty. Records no Audit Event: creating a Player changes no privacy
+    setting. The 13-and-older rule is #114.
     """
     with transaction.atomic():
+        # Lock the Account row, so two calls for one Account run their
+        # one-Player check in turn and the second gets a ValidationError.
+        get_user_model().objects.select_for_update().filter(pk=account.pk).first()
         player = Player(
             account=account,
             display_name=display_name,
-            legal_name=legal_name,
+            legal_name=legal_name or "",
             birth_year=birth_year,
             birth_month=birth_month,
-            gender_division=gender_division,
-            city=city,
-            region=region,
+            gender_division=gender_division or "",
+            city=city or "",
+            region=region or "",
         )
         player.full_clean()
         player.save()
@@ -70,20 +75,41 @@ def create_player(
     return player
 
 
+_NOT_OWN_PLAYER = "Only the player can change their own Player."
+
+
 def _refuse_unless_owner(player: Player, actor: "_User | AnonymousUser | None") -> None:
+    """A first check on the instances passed in, before any query."""
     if (
         actor is None
         or not actor.is_authenticated
         or not actor.is_active
         or actor.pk != player.account_id
     ):
-        raise NotOwnPlayer("Only the player can change their own Player.")
+        raise NotOwnPlayer(_NOT_OWN_PLAYER)
 
 
-def _refuse_unknown(changes: Mapping[str, object], allowed: tuple[str, ...]) -> None:
-    unknown = sorted(set(changes) - set(allowed))
-    if unknown:
-        raise ValueError(f"Not a field that can be changed: {', '.join(unknown)}.")
+def _lock_own_player(player: Player, actor: "_User | AnonymousUser | None") -> Player:
+    """Lock and return the stored Player, if ``actor`` is its active Account.
+
+    Call inside the transaction. The check uses the stored rows, so an
+    instance changed in memory or loaded before a deactivation cannot pass.
+    """
+    locked = Player.objects.select_for_update().get(pk=player.pk)
+    if actor is None or actor.pk != locked.account_id:
+        raise NotOwnPlayer(_NOT_OWN_PLAYER)
+    owner_active = (
+        get_user_model().objects.filter(pk=locked.account_id, is_active=True).exists()
+    )
+    if not owner_active:
+        raise NotOwnPlayer(_NOT_OWN_PLAYER)
+    return locked
+
+
+def _refuse_unknown(keys: Iterable[object], allowed: tuple[str, ...]) -> None:
+    # A fixed message: the keys are client input (CLAUDE.md, API).
+    if any(not isinstance(key, str) or key not in allowed for key in keys):
+        raise ValueError("Not a field that can be changed.")
 
 
 def update_profile(
@@ -102,14 +128,14 @@ def update_profile(
     _refuse_unless_owner(player, actor)
     _refuse_unknown(changes, PROFILE_FIELDS)
     with transaction.atomic():
-        locked = Player.objects.select_for_update().get(pk=player.pk)
+        locked = _lock_own_player(player, actor)
         old = {name: getattr(locked, name) for name in PROFILE_FIELDS}
         for name, value in changes.items():
             setattr(locked, name, value)
         locked.full_clean()
-        changed = sorted(
-            name for name in PROFILE_FIELDS if getattr(locked, name) != old[name]
-        )
+        # Only fields named in changes: full_clean also normalizes the
+        # others in memory, and those must not be rewritten.
+        changed = sorted(name for name in changes if getattr(locked, name) != old[name])
         if changed:
             locked.save(update_fields=changed)
             # Names only: these are identifying fields (ADR 0009).
@@ -138,7 +164,8 @@ def update_privacy(
     _refuse_unless_owner(player, actor)
     _refuse_unknown(changes, PlayerPrivacy.SETTINGS)
     with transaction.atomic():
-        privacy = PlayerPrivacy.objects.select_for_update().get(player=player)
+        locked = _lock_own_player(player, actor)
+        privacy = PlayerPrivacy.objects.select_for_update().get(player=locked)
         old = snapshot(privacy, PlayerPrivacy.SETTINGS)
         for name, value in changes.items():
             setattr(privacy, name, value)
@@ -151,9 +178,11 @@ def update_privacy(
             privacy.save(update_fields=changed)
             record_event(
                 action=AuditAction.PRIVACY_CHANGE,
-                target=player,
+                target=locked,
                 actor=actor,
                 before={name: old[name] for name in changed},
                 after={name: new[name] for name in changed},
             )
+    # Replace the caller's cached row, so player.privacy shows the change.
+    player.privacy = privacy
     return privacy

@@ -5,6 +5,8 @@ also creates its PlayerPrivacy row. Only the player changes these fields
 and settings, through the services in that module.
 """
 
+import unicodedata
+from collections.abc import Collection
 from typing import TYPE_CHECKING, ClassVar
 
 from django.conf import settings
@@ -24,7 +26,16 @@ if TYPE_CHECKING:
 # Messages never include the submitted value (CLAUDE.md, API). Django's
 # defaults for these keys do.
 _CHOICE_MESSAGES = {"invalid_choice": "Choose one of the listed options."}
-_INTEGER_MESSAGES = {"invalid": "Enter a whole number."}
+_WHOLE_NUMBER = "Enter a whole number."
+_INTEGER_MESSAGES = {"invalid": _WHOLE_NUMBER}
+_CONTROL_CHARACTER = "Remove control characters."
+
+# Text fields stripped and checked for control characters before field
+# validation, so max_length counts the stored value.
+TEXT_FIELDS = ("display_name", "legal_name", "city", "region")
+# Optional text fields where None means cleared, stored as "".
+OPTIONAL_TEXT_FIELDS = ("legal_name", "gender_division", "city", "region")
+BIRTH_FIELDS = ("birth_year", "birth_month")
 
 EARLIEST_BIRTH_YEAR = 1900
 
@@ -91,7 +102,8 @@ class Player(PublicCodeModel):
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
-                condition=~Q(display_name=""),
+                # Refuses "" and whitespace only.
+                condition=~Q(display_name__regex=r"^\s*$"),
                 name="players_player_display_name_not_empty",
             ),
             models.CheckConstraint(
@@ -112,13 +124,44 @@ class Player(PublicCodeModel):
         # The OPEN Code, never a name (ADR 0009).
         return self.public_code
 
-    def clean(self) -> None:
-        for name in ("display_name", "legal_name", "city", "region"):
+    def clean_fields(self, exclude: Collection[str] | None = None) -> None:
+        """Normalize and check the input before Django's field validation.
+
+        None clears an optional text field. Text is stripped first, so
+        max_length counts the stored value. Control characters are
+        refused, since Postgres cannot store NUL. Birth year and month
+        must be real ints: Django's own conversion would truncate a float,
+        accept a bool, or overflow on infinity.
+        """
+        skip = set(exclude or ())
+        errors: dict[str, list[ValidationError]] = {}
+        for name in OPTIONAL_TEXT_FIELDS:
+            if name not in skip and getattr(self, name) is None:
+                setattr(self, name, "")
+        for name in TEXT_FIELDS:
             value = getattr(self, name)
-            if isinstance(value, str):
-                setattr(self, name, value.strip())
+            if name in skip or not isinstance(value, str):
+                continue
+            value = value.strip()
+            setattr(self, name, value)
+            if any(unicodedata.category(char) == "Cc" for char in value):
+                errors[name] = [ValidationError(_CONTROL_CHARACTER)]
+        for name in BIRTH_FIELDS:
+            value = getattr(self, name)
+            if name in skip or value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int):
+                errors[name] = [ValidationError(_WHOLE_NUMBER)]
+        try:
+            super().clean_fields(exclude=skip | set(errors))
+        except ValidationError as error:
+            errors = error.update_error_dict(errors)
+        if errors:
+            raise ValidationError(errors)
+
+    def clean(self) -> None:
         errors: dict[str, str] = {}
-        if not self.display_name:
+        if not _has_visible_character(self.display_name):
             errors["display_name"] = "Enter a display name."
         if self._birth_month_is_in_the_future():
             errors["birth_month"] = "The birth year and month cannot be in the future."
@@ -127,11 +170,29 @@ class Player(PublicCodeModel):
 
     def _birth_month_is_in_the_future(self) -> bool:
         year, month = self.birth_year, self.birth_month
-        if not isinstance(year, int) or not isinstance(month, int):
+        if not _is_int(year) or not _is_int(month):
             # Field validation reports a missing or malformed value.
             return False
         today = timezone.localdate()
         return (year, month) > (today.year, today.month)
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _has_visible_character(value: object) -> bool:
+    """True when ``value`` has a character other than spacing or format ones.
+
+    Spaces and separators (Z*), control characters (Cc), and format
+    characters such as a zero-width space (Cf) do not count.
+    """
+    if not isinstance(value, str):
+        return False
+    return any(
+        not category.startswith("Z") and category not in {"Cc", "Cf"}
+        for category in map(unicodedata.category, value)
+    )
 
 
 class PlayerPrivacy(models.Model):
@@ -196,7 +257,9 @@ class PlayerPrivacy(models.Model):
         """True when ``viewer`` may see the detail ``setting`` covers.
 
         Nobody signed out or inactive sees anything. The player's own
-        Account always does. Another Account does only at ``SIGNED_IN``.
+        Account always does. Another Account does only at ``SIGNED_IN``,
+        and only while the player's Account is active: ADR 0002 shows a
+        Player's name only then, so its other details must not outlast it.
         """
         if setting not in self.SETTINGS:
             raise ValueError(f"{setting} is not a privacy setting.")
@@ -204,4 +267,6 @@ class PlayerPrivacy(models.Model):
             return False
         if viewer.pk == self.player.account_id:
             return True
+        if not self.player.account.is_active:
+            return False
         return bool(getattr(self, setting) == Visibility.SIGNED_IN)

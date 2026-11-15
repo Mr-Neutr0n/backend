@@ -6,7 +6,6 @@ import pytest
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
 
 from apps.accounts.tests.factories import UserFactory
 from apps.audit.models import AuditAction, AuditEvent
@@ -102,7 +101,7 @@ def test_create_player_without_birth_year_or_month_fails(field: str) -> None:
 
 
 def test_create_player_twice_for_one_account_fails(player: Player) -> None:
-    with pytest.raises((ValidationError, IntegrityError)), transaction.atomic():
+    with pytest.raises(ValidationError) as caught:
         create_player(
             account=player.account,
             display_name="Another Made-up Player",
@@ -110,6 +109,7 @@ def test_create_player_twice_for_one_account_fails(player: Player) -> None:
             birth_month=2,
         )
 
+    assert "account" in caught.value.message_dict
     assert Player.objects.count() == 1
 
 
@@ -206,7 +206,7 @@ def test_invalid_profile_change_saves_nothing(player: Player, owner: "_User") ->
 
 
 def test_unknown_profile_field_is_refused(player: Player, owner: "_User") -> None:
-    with pytest.raises(ValueError, match="account") as caught:
+    with pytest.raises(ValueError, match="Not a field that can be changed") as caught:
         update_profile(player=player, actor=owner, changes={"account": "x-made-up"})
 
     assert "x-made-up" not in str(caught.value)
@@ -282,13 +282,14 @@ def test_invalid_privacy_level_saves_nothing(player: Player, owner: "_User") -> 
 
 
 def test_unknown_privacy_setting_is_refused(player: Player, owner: "_User") -> None:
-    with pytest.raises(ValueError, match="display_name_visibility"):
+    with pytest.raises(ValueError, match="Not a field that can be changed") as caught:
         update_privacy(
             player=player,
             actor=owner,
             changes={"display_name_visibility": "private"},
         )
 
+    assert "display_name_visibility" not in str(caught.value)
     assert _events() == []
 
 
