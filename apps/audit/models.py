@@ -38,6 +38,8 @@ class AuditAction(models.TextChoices):
     OAUTH_APP_REVOKE = "oauth_app.revoke", "OAuth application revocation"
     PRIVACY_CHANGE = "privacy.change", "Privacy setting change"
     PLAYER_PROFILE_CHANGE = "player.profile_change", "Player profile change"
+    ORGANIZER_VERIFY = "organizer.verify", "Organizer verification"
+    ORGANIZER_UNVERIFY = "organizer.unverify", "Organizer verification removed"
 
 
 class AuditEventImmutable(RuntimeError):

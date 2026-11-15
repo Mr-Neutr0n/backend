@@ -24,5 +24,9 @@
 # the base for identity linking.
 /apps/players/ @openpickleball/maintainers
 
+# Organizer verification (a verified Organizer's submissions count as
+# confirmed) and the club and organizer roles.
+/apps/clubs/ @openpickleball/maintainers
+
 # CI, the DCO check, and this file.
 /.github/ @openpickleball/maintainers
