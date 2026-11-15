@@ -463,9 +463,10 @@ def test_the_day_after_the_latest_local_date_fails() -> None:
 
 
 def test_the_future_check_uses_utc(monkeypatch: pytest.MonkeyPatch) -> None:
-    # 23:30 at UTC-5 is 04:30 the next day in UTC: the latest local date
-    # anywhere is then two days after the local date at UTC-5.
-    local = datetime(2026, 6, 15, 23, 30, tzinfo=dt_timezone(timedelta(hours=-5)))
+    # 23:30 on June 15 at UTC-12 is 11:30 on June 16 in UTC, so the latest
+    # local date anywhere (UTC+14) is June 17. Adding 14 hours to the local
+    # time instead would give June 16.
+    local = datetime(2026, 6, 15, 23, 30, tzinfo=dt_timezone(timedelta(hours=-12)))
     monkeypatch.setattr("apps.matches.services.timezone.now", lambda: local)
     assert _validate(played_on=date(2026, 6, 17)).played_on == date(2026, 6, 17)
     assert _outcome(played_on=date(2026, 6, 18)) == {("played_on", "future_date")}
