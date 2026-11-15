@@ -332,6 +332,11 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
                 condition=Q(external_id="") | Q(submitted_by_application__isnull=False),
                 name="matches_match_external_id_needs_application",
             ),
+            models.CheckConstraint(
+                # Raw writes skip the model's stripping.
+                condition=~Q(external_id__regex=r"^\s|\s$"),
+                name="matches_match_external_id_trimmed",
+            ),
             models.UniqueConstraint(
                 fields=("submitted_by_application", "external_id"),
                 condition=~Q(external_id=""),
