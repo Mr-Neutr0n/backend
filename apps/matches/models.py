@@ -76,6 +76,7 @@ _EXTERNAL_ID_NEEDS_APPLICATION = (
 _EXTERNAL_ID_TAKEN = "This application already submitted a match with this external ID."
 _PLAYED_AT_NEEDS_OFFSET = "Give the venue's UTC offset with the time played."
 _OFFSET_NEEDS_PLAYED_AT = "Give the time played with the venue's UTC offset."
+_PLAYED_AT_NAIVE = "Give the time played with its time zone."
 _LOCAL_DATE = "The date played must be the local date of the time played."
 
 # played_at shifted to the venue's local time, as a date. Postgres keeps a
@@ -322,9 +323,10 @@ class Match(_CleanedTextModel):
             errors["played_at_utc_offset"] = _PLAYED_AT_NEEDS_OFFSET
         elif played_at is None and offset is not None:
             errors["played_at"] = _OFFSET_NEEDS_PLAYED_AT
+        elif isinstance(played_at, datetime.datetime) and played_at.utcoffset() is None:
+            errors["played_at"] = _PLAYED_AT_NAIVE
         elif (
             isinstance(played_at, datetime.datetime)
-            and played_at.tzinfo is not None
             and isinstance(offset, int)
             and MIN_UTC_OFFSET_MINUTES <= offset <= MAX_UTC_OFFSET_MINUTES
             and isinstance(self.played_on, datetime.date)
