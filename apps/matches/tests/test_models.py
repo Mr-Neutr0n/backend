@@ -32,6 +32,7 @@ from apps.partners.models import PartnerApplication
 from apps.partners.tests.factories import PartnerApplicationFactory
 from apps.players.models import Player
 from apps.players.tests.factories import PlayerFactory
+from apps.public_ids import codes
 from apps.public_ids.codes import CodeType
 from apps.public_ids.models import IssuedCode
 
@@ -109,6 +110,27 @@ def test_two_matches_get_distinct_codes(user: User) -> None:
     second = Match.objects.create(**_values(user))
 
     assert first.public_code != second.public_code
+
+
+def test_match_code_comes_only_from_the_random_generator(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The generator takes only the code type, never the row, so a code
+    # cannot be worked out from the row id (ADR 0008).
+    made = [codes.generate(CodeType.MATCH) for _ in range(3)]
+    handed_out = iter(reversed(made))
+    calls: list[CodeType] = []
+
+    def fake_generate(code_type: CodeType) -> str:
+        calls.append(code_type)
+        return next(handed_out)
+
+    monkeypatch.setattr(codes, "generate", fake_generate)
+    matches = [Match.objects.create(**_values(user)) for _ in range(3)]
+
+    assert [match.public_code for match in matches] == list(reversed(made))
+    assert calls == [CodeType.MATCH] * 3
+    assert [match.pk for match in matches] == sorted(match.pk for match in matches)
 
 
 def test_str_is_the_open_code(user: User) -> None:
@@ -449,6 +471,7 @@ def test_missing_link_message_does_not_echo_the_id(field: str) -> None:
     values = _values(None, **{field: 987654321})
     error = _clean_errors(**values)
 
+    assert field.removesuffix("_id") in error.message_dict
     assert "987654321" not in _messages(error)
 
 
@@ -564,6 +587,23 @@ def test_two_games_with_one_number_are_refused(match: Match) -> None:
 @pytest.mark.parametrize("side", ["team_a_score", "team_b_score"])
 def test_negative_score_is_refused(match: Match, side: str) -> None:
     _game_refused(f"matches_game_{side}_check", match, **{side: -1})
+
+
+@pytest.mark.parametrize("field", ["game_number", "team_a_score", "team_b_score"])
+def test_game_bad_number_message_does_not_echo_it(match: Match, field: str) -> None:
+    values: dict[str, Any] = {
+        "match": match,
+        "game_number": 1,
+        "team_a_score": 11,
+        "team_b_score": 7,
+    }
+    game = Game(**{**values, field: MARKER})
+
+    with pytest.raises(ValidationError) as error:
+        game.full_clean()
+
+    assert field in error.value.message_dict
+    assert MARKER not in _messages(error.value)
 
 
 def test_game_str_is_the_match_code_and_number(match: Match) -> None:
