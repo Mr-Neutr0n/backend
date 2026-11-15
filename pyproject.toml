@@ -104,6 +104,14 @@ disable_error_code = ["union-attr"]
 module = ["config.tests.test_api_body_field_paths"]
 disallow_any_generics = false
 
+[[tool.mypy.overrides]]
+# These tests build throwaway coded models at runtime and type them as
+# type[PublicCodeModel]. Once a concrete subclass is installed (Player),
+# the django-stubs plugin checks their create() and only() arguments
+# against PublicCodeModel's own fields, which lack the throwaway ones.
+module = ["apps.public_ids.tests.*"]
+disable_error_code = ["misc"]
+
 [tool.django-stubs]
 django_settings_module = "config.settings"
 
