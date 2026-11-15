@@ -160,9 +160,16 @@ class Organizer(_CleanedTextModel):
         except ``verified_at`` and ``verified_by``, so an instance loaded
         before a verify or unverify cannot write the old status back.
         Only an explicit ``update_fields`` (what the services pass) writes
-        them.
+        them. A new Organizer must start unverified, so a copy of a
+        verified one is refused before any code is issued.
         """
-        if not self._state.adding and kwargs.get("update_fields") is None:
+        if self._state.adding:
+            if self.verified_at is not None or self.verified_by_id is not None:
+                raise ValueError(
+                    "A new organizer starts unverified: verify it through "
+                    "apps.clubs.services."
+                )
+        elif kwargs.get("update_fields") is None:
             deferred = self.get_deferred_fields()
             kwargs["update_fields"] = [
                 field.name
