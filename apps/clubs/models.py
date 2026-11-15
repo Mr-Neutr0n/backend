@@ -227,10 +227,10 @@ class Organizer(_CleanedTextModel):
 class OrganizerMember(models.Model):
     """An Account that acts for an Organizer, with its role.
 
-    The Account that verified the Organizer cannot be its member, so no
-    one verifies an Organizer they act for. ``clean()`` and ``save()``
-    refuse it. ``bulk_create`` and ``QuerySet.update`` skip the check,
-    like any other raw write.
+    While the Organizer is verified, the Account that verified it cannot
+    be its member, so no one verifies an Organizer they act for.
+    ``clean()`` and ``save()`` refuse it. ``bulk_create`` and
+    ``QuerySet.update`` skip the check, like any other raw write.
     """
 
     organizer = models.ForeignKey(
