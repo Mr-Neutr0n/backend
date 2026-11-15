@@ -105,6 +105,7 @@ class OrganizerAdmin(admin.ModelAdmin[Organizer]):
     ) -> None:
         count = 0
         for organizer in queryset.order_by("pk"):
+            was_verified = organizer.is_verified
             try:
                 change(organizer, actor=request.user, reason=ADMIN_REASON)
             except NotAllowedToVerify:
@@ -116,6 +117,8 @@ class OrganizerAdmin(admin.ModelAdmin[Organizer]):
                     level=messages.WARNING,
                 )
                 continue
-            count += 1
+            # A call that found the status already set changed nothing.
+            if organizer.is_verified != was_verified:
+                count += 1
         if count:
             self.message_user(request, f"{count} organizer(s) {done}.")
