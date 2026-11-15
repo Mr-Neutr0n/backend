@@ -206,9 +206,12 @@ class OrganizerMember(models.Model):
     organizer = models.ForeignKey(
         Organizer, on_delete=models.CASCADE, related_name="members"
     )
+    # PROTECT: the membership may be the only link from an Organizer that
+    # is a person to that person, so an Account is not hard-deleted out
+    # from under it (ADR 0009, Retention; #116 plans account deletion).
     account = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="organizer_memberships",
     )
     role = models.CharField(
