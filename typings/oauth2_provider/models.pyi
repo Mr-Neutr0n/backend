@@ -22,6 +22,9 @@ class AbstractApplication(models.Model):
     GRANT_PASSWORD: ClassVar[str]
     GRANT_CLIENT_CREDENTIALS: ClassVar[str]
     GRANT_OPENID_HYBRID: ClassVar[str]
+    NO_ALGORITHM: ClassVar[str]
+    RS256_ALGORITHM: ClassVar[str]
+    HS256_ALGORITHM: ClassVar[str]
 
     class Meta:
         abstract: ClassVar[bool]
