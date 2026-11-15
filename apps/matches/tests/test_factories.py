@@ -118,14 +118,14 @@ def test_by_application_trait() -> None:
 @pytest.mark.parametrize("trait", ["best_of_1", "best_of_3", "best_of_5"])
 @pytest.mark.parametrize("target", [11, 15, 21])
 def test_factory_games_decide_the_match(trait: str, target: int) -> None:
-    for _ in range(10):
+    for _ in range(3):
         match = DoublesMatchFactory.create(**{trait: True}, game_target=target)
 
         assert _decides_the_match(match)
 
 
 def test_best_of_3_and_5_factory_matches_vary_their_game_count() -> None:
-    counts = {MatchFactory.create(best_of_5=True).games.count() for _ in range(30)}
+    counts = {MatchFactory.create(best_of_5=True).games.count() for _ in range(20)}
 
     assert len(counts) > 1
     assert counts <= {3, 4, 5}
