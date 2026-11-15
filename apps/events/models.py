@@ -14,6 +14,7 @@ should accept it.
 """
 
 import datetime
+from collections.abc import Collection
 from decimal import Decimal
 from typing import ClassVar
 
@@ -36,6 +37,7 @@ _DATE_MESSAGE = "Enter a valid date in YYYY-MM-DD format."
 _DATE_MESSAGES = {"invalid": _DATE_MESSAGE, "invalid_date": _DATE_MESSAGE}
 _NUMBER_MESSAGES = {"invalid": "Enter a number."}
 _DATES_ORDER = "The end date cannot be before the start date."
+_DATE_FIELDS = frozenset({"start_date", "end_date"})
 # Django's default names the submitted row id.
 _ORGANIZER_MESSAGES = {"invalid": "Choose an existing organizer."}
 _CLUB_MESSAGES = {"invalid": "Choose an existing club."}
@@ -116,9 +118,24 @@ class Event(_CleanedTextModel):
         # The OPEN Code, never the name, for one rule with Club and Organizer.
         return self.public_code
 
+    def clean_fields(self, exclude: Collection[str] | None = None) -> None:
+        """Validate the fields, noting each date that was not checked.
+
+        A date that failed or was excluded is not a value to compare: a
+        form leaves a field that failed at its stored value, and Django
+        still runs ``clean()``.
+        """
+        self._unchecked_dates = _DATE_FIELDS & set(exclude or ())
+        try:
+            super().clean_fields(exclude=exclude)
+        except ValidationError as error:
+            self._unchecked_dates |= _DATE_FIELDS & set(error.message_dict)
+            raise
+
     def clean(self) -> None:
-        # Django runs clean() even when a field failed, so a date may still
-        # be the raw input here.
+        if getattr(self, "_unchecked_dates", None):
+            return
+        # Called without clean_fields(), a date may still be raw input.
         start, end = self.start_date, self.end_date
         if (
             isinstance(start, datetime.date)
