@@ -158,7 +158,9 @@ class PartnerApplication(AbstractApplication):
         except ``approved_at`` and ``approved_by``, so an instance loaded
         before an approval change cannot write the old status back. A new
         application must start unapproved, so a copy of an approved one is
-        refused before any write.
+        refused before any write. A new application is always inserted
+        (``force_insert``, even when ``asave()`` or a caller passes False),
+        so an instance built with an existing pk cannot overwrite that row.
 
         The stored client secret is never rewritten: a save of an existing
         row leaves it out when it is deferred or hash-shaped (see
@@ -201,7 +203,10 @@ class PartnerApplication(AbstractApplication):
         if self._state.adding and update_fields is None:
             # A new instance given an existing pk would otherwise UPDATE
             # that row, approval included. It fails on the pk instead.
-            kwargs.setdefault("force_insert", True)
+            # asave() always passes force_insert=False, so a falsy value is
+            # replaced; a truthy one (such as a tuple of parents) is kept.
+            if not kwargs.get("force_update") and not kwargs.get("force_insert"):
+                kwargs["force_insert"] = True
         elif update_fields is None:
             deferred = self.get_deferred_fields()
             kwargs["update_fields"] = [
