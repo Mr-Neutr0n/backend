@@ -261,6 +261,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.audit",
     "apps.public_ids",
+    "apps.players",
 ]
 
 # The OPEN Account login model, keyed on email (apps/accounts).
