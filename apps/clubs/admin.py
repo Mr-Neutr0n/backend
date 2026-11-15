@@ -117,6 +117,14 @@ class OrganizerAdmin(admin.ModelAdmin[Organizer]):
                     level=messages.WARNING,
                 )
                 continue
+            except Organizer.DoesNotExist:
+                # Deleted after the action loaded it. The OPEN Code only.
+                self.message_user(
+                    request,
+                    f"{organizer.public_code} was not changed: it no longer exists.",
+                    level=messages.WARNING,
+                )
+                continue
             # A call that found the status already set changed nothing.
             if organizer.is_verified != was_verified:
                 count += 1
