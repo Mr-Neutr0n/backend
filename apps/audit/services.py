@@ -14,6 +14,7 @@ from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
+from oauth2_provider.models import get_application_model
 
 from apps.audit.models import AuditAction, AuditEvent
 
@@ -162,8 +163,9 @@ def record_event(
     with a primary key. To record a delete, call this before ``delete()``,
     which clears the instance's primary key. An anonymous or missing actor
     is stored as no actor. ``actor_application`` is the Partner
-    Application that acted, if any, and must be saved too. Sensitive keys in ``before`` and ``after`` are
-    redacted (see ``_redact``).
+    Application that acted, if any: an instance of the swapped OAuth
+    Application model, and saved. Sensitive keys in ``before`` and
+    ``after`` are redacted (see ``_redact``).
     """
     if not isinstance(action, str) or action not in AuditAction.values:
         raise ValueError("The action is not an AuditAction.")
@@ -175,8 +177,16 @@ def record_event(
         if not _is_saved(actor):
             raise ValueError("The actor must be saved before it is audited.")
         actor_id = actor.pk
-    if actor_application is not None and not _is_saved(actor_application):
-        raise ValueError("The actor application must be saved before it is audited.")
+    if actor_application is not None:
+        # Checked here, so Django's own error, which shows the value (an
+        # Account's email), never surfaces. Resolved lazily: the setting
+        # names the model.
+        if not isinstance(actor_application, get_application_model()):
+            raise ValueError("The actor application is not a partner application.")
+        if not _is_saved(actor_application):
+            raise ValueError(
+                "The actor application must be saved before it is audited."
+            )
 
     return AuditEvent.objects.create(
         action=AuditAction(action),
