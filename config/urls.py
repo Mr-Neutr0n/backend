@@ -16,11 +16,13 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 
 from config.api import api
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/", api.urls),
+    # Only the token and revoke views (apps/partners/urls.py).
+    path("oauth/", include("apps.partners.urls")),
 ]

@@ -10,6 +10,7 @@ dependencies = [
     "django-cors-headers>=4.9.0",
     "django-environ>=0.14.0",
     "django-ninja>=1.8.0",
+    "django-oauth-toolkit>=3.4.1",
     "django-stubs-ext>=6.1.2",
     "gunicorn>=27.0.1",
     "psycopg[binary]>=3.3.8",
@@ -73,6 +74,8 @@ ignore = ["E501"]
 python_version = "3.13"
 strict = true
 plugins = ["mypy_django_plugin.main"]
+# Local stubs for packages that ship none (typings/oauth2_provider).
+mypy_path = "typings"
 # Skip ignored directories such as .venv and .claude/worktrees.
 exclude_gitignore = true
 
@@ -84,6 +87,13 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # django-celery-beat ships no type information.
 module = ["django_celery_beat", "django_celery_beat.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# django-oauth-toolkit ships no type information. typings/ stubs the
+# models module (so the swapped Application model is a typed model); its
+# other modules are untyped.
+module = ["oauth2_provider", "oauth2_provider.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

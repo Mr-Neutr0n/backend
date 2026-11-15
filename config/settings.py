@@ -246,8 +246,9 @@ REDIS_URL = _redis_url(_required("REDIS_URL"))
 
 # First-party apps live under apps/ and are added as apps.<name>.
 # AUTH_USER_MODEL is fixed below and must not change once migrations exist.
-# The custom OAuth Application model (issue #22) must land before
-# django-oauth-toolkit's migrations are run.
+# django-oauth-toolkit's Application model is swapped for
+# partners.PartnerApplication (decision Q3). partners' first migration runs
+# before django-oauth-toolkit's, whose tables point at it.
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -258,16 +259,45 @@ INSTALLED_APPS = [
     "corsheaders",
     "ninja",
     "django_celery_beat",
+    "oauth2_provider",
     "apps.accounts",
     "apps.audit",
     "apps.public_ids",
     "apps.players",
     "apps.clubs",
     "apps.events",
+    # After oauth2_provider, so its admin module replaces the
+    # Application admin that oauth2_provider registers.
+    "apps.partners",
 ]
 
 # The OPEN Account login model, keyed on email (apps/accounts).
 AUTH_USER_MODEL = "accounts.User"
+
+# django-oauth-toolkit's Application, swapped for the OPEN one (decision
+# Q3). Fixed once migrations exist, like AUTH_USER_MODEL.
+OAUTH2_PROVIDER_APPLICATION_MODEL = "partners.PartnerApplication"
+
+# django-oauth-toolkit adopts every RFC 9700 (OAuth 2.0 Security BCP)
+# behavior now, ahead of its 4.0 defaults: tokens hashed at rest, no
+# implicit or password grant, no plain PKCE, no token in the query string,
+# refresh token replay revokes the family, https redirect URIs only. The
+# config gates make a later insecure value fail `check --deploy`. Scopes,
+# lifetimes, and grant types are #28.
+OAUTH2_PROVIDER = {
+    "COMPLIANT_BCP_RFC9700_IMPLICIT_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_PASSWORD_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_PKCE_METHOD": True,
+    "COMPLIANT_BCP_RFC9700_ACCESS_TOKEN_TRANSPORT": True,
+    "COMPLIANT_BCP_RFC9700_AUTHZ_RESPONSE_ISS": True,
+    "COMPLIANT_BCP_RFC9700_TOKEN_STORAGE": True,
+    "COMPLIANT_BCP_RFC9700_REFRESH_TOKEN": True,
+    "COMPLIANT_BCP_RFC9700_REDIRECT_URI_SCHEME": True,
+    "COMPLIANT_BCP_RFC9700_REDIRECT_URI_MATCHING": True,
+    "COMPLIANT_BCP_RFC9700_PKCE_REQUIRED": True,
+    "REFRESH_TOKEN_REUSE_PROTECTION": True,
+    "ALLOWED_REDIRECT_URI_SCHEMES": ["https"],
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

@@ -28,5 +28,9 @@
 # confirmed) and the club and organizer roles.
 /apps/clubs/ @openpickleball/maintainers
 
+# Partner Applications (OAuth clients), their approval, and Club
+# Application Grants, which decide who may submit a club's matches.
+/apps/partners/ @openpickleball/maintainers
+
 # CI, the DCO check, and this file.
 /.github/ @openpickleball/maintainers
