@@ -76,6 +76,14 @@ class _CleanedTextModel(PublicCodeModel):
             raise ValidationError(errors)
 
 
+class VerifiedOrganizerDelete(ValueError):
+    """A delete was refused because an Organizer is verified."""
+
+    def __init__(self, public_codes: list[str]) -> None:
+        super().__init__(VERIFIED_DELETE_MESSAGE)
+        self.public_codes = public_codes
+
+
 class MemberRole(models.TextChoices):
     """A role an Account holds at an Organizer or a Club."""
 
@@ -185,13 +193,24 @@ class Organizer(_CleanedTextModel):
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         """Delete an unverified Organizer. A verified one is refused.
 
+        The check reads the stored row under a lock, not this instance.
+
         Deleting would drop the verification with no Audit Event, so
         unverify it first through the services, which records one.
         ``QuerySet.delete()`` skips this check, like any other raw write.
         """
-        if self.is_verified:
-            raise ValueError(VERIFIED_DELETE_MESSAGE)
-        return super().delete(*args, **kwargs)
+        with transaction.atomic():
+            # Lock and read the stored row: an instance loaded before a
+            # verify would otherwise delete a verified Organizer.
+            stored = (
+                Organizer.objects.select_for_update()
+                .filter(pk=self.pk)
+                .values_list("verified_at", flat=True)
+                .first()
+            )
+            if self.is_verified or stored is not None:
+                raise VerifiedOrganizerDelete([self.public_code])
+            return super().delete(*args, **kwargs)
 
 
 class OrganizerMember(models.Model):

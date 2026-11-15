@@ -9,10 +9,19 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from django.contrib import admin, messages
+from django.contrib.admin.actions import delete_selected as django_delete_selected
+from django.db import transaction
 from django.db.models import QuerySet
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.urls import reverse
 
-from apps.clubs.models import Club, ClubRole, Organizer, OrganizerMember
+from apps.clubs.models import (
+    Club,
+    ClubRole,
+    Organizer,
+    OrganizerMember,
+    VerifiedOrganizerDelete,
+)
 from apps.clubs.services import (
     VERIFY_PERMISSION,
     NotAllowedToVerify,
@@ -49,7 +58,7 @@ class OrganizerAdmin(admin.ModelAdmin[Organizer]):
     readonly_fields = ("public_code", "verified_at", "verified_by")
     search_fields = ("public_code", "name")
     inlines = (OrganizerMemberInline,)
-    actions = ("verify_selected", "unverify_selected")
+    actions = ("verify_selected", "unverify_selected", "delete_selected")
 
     def get_deleted_objects(
         self, objs: Sequence[Organizer] | QuerySet[Organizer], request: HttpRequest
@@ -71,6 +80,75 @@ class OrganizerAdmin(admin.ModelAdmin[Organizer]):
                     f"Organizer {organizer.public_code} is verified: unverify it first."
                 )
         return to_delete, model_count, perms_needed, protected
+
+    def delete_queryset(
+        self, request: HttpRequest, queryset: QuerySet[Organizer]
+    ) -> None:
+        """Delete the selection, or nothing if any of it is now verified.
+
+        ``get_deleted_objects`` checked earlier, but a row can be verified
+        between that read and this delete, so lock the rows and check
+        again. A refusal raises, and ``delete_selected`` rolls back.
+        """
+        with transaction.atomic():
+            pks = list(queryset.values_list("pk", flat=True))
+            locked = Organizer.objects.select_for_update().filter(pk__in=pks)
+            verified = [o.public_code for o in locked.order_by("pk") if o.is_verified]
+            if verified:
+                raise VerifiedOrganizerDelete(verified)
+            super().delete_queryset(request, queryset)
+
+    @admin.action(
+        permissions=["delete"],
+        description=django_delete_selected.short_description,  # type: ignore[attr-defined]
+    )
+    def delete_selected(
+        self, request: HttpRequest, queryset: QuerySet[Organizer]
+    ) -> HttpResponse | None:
+        """Django's delete_selected, in one transaction.
+
+        A refusal from ``delete_queryset`` then also rolls back the
+        deletion log entries, and shows a warning instead of a 500.
+        """
+        try:
+            with transaction.atomic():
+                response: HttpResponse | None = django_delete_selected(
+                    self, request, queryset
+                )
+                return response
+        except VerifiedOrganizerDelete as refused:
+            self._warn_verified(request, refused.public_codes)
+            return None
+
+    def delete_view(
+        self, request: HttpRequest, object_id: str, extra_context: Any = None
+    ) -> HttpResponse:
+        """Django's delete view, with a refusal shown as a warning.
+
+        ``Organizer.delete()`` refuses a row that is verified when it is
+        locked. Django's view runs in a transaction, so the refusal also
+        rolls back its deletion log entry.
+        """
+        try:
+            return super().delete_view(request, object_id, extra_context)
+        except VerifiedOrganizerDelete as refused:
+            self._warn_verified(request, refused.public_codes)
+            return HttpResponseRedirect(
+                reverse(
+                    "admin:clubs_organizer_change",
+                    args=[object_id],
+                    current_app=self.admin_site.name,
+                )
+            )
+
+    def _warn_verified(self, request: HttpRequest, public_codes: list[str]) -> None:
+        for code in public_codes:
+            # The OPEN Code only: the name may be a person's.
+            self.message_user(
+                request,
+                f"{code} was not deleted: it is verified. Unverify it first.",
+                level=messages.WARNING,
+            )
 
     def has_verify_permission(self, request: HttpRequest) -> bool:
         """Django shows an action marked ``permissions=["verify"]`` only
