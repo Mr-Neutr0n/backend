@@ -12,7 +12,7 @@ from typing import Any, ClassVar
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 
 from apps.public_ids.codes import CodeType
@@ -25,6 +25,7 @@ _CONTROL_CHARACTER = "Remove control or invalid characters."
 _NOT_TEXT = "Enter text."
 # Written only by apps.clubs.services.
 VERIFICATION_FIELDS = ("verified_at", "verified_by")
+_VERIFIER_MEMBER = "The account that verified this organizer cannot be its member."
 VERIFIED_DELETE_MESSAGE = "A verified organizer cannot be deleted: unverify it first."
 # Control characters (Postgres cannot store NUL) and lone surrogates
 # (not encodable as UTF-8).
@@ -194,7 +195,13 @@ class Organizer(_CleanedTextModel):
 
 
 class OrganizerMember(models.Model):
-    """An Account that acts for an Organizer, with its role."""
+    """An Account that acts for an Organizer, with its role.
+
+    The Account that verified the Organizer cannot be its member, so no
+    one verifies an Organizer they act for. ``clean()`` and ``save()``
+    refuse it. ``bulk_create`` and ``QuerySet.update`` skip the check,
+    like any other raw write.
+    """
 
     organizer = models.ForeignKey(
         Organizer, on_delete=models.CASCADE, related_name="members"
@@ -223,6 +230,32 @@ class OrganizerMember(models.Model):
     def __str__(self) -> str:
         # Never the Account's email (CLAUDE.md, Personal data).
         return f"{self.organizer.public_code} {self.role}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Save, refusing the Organizer's verifier as a member.
+
+        The Organizer row is locked first, as the services lock it, so a
+        verify and this save run in turn and the rule holds either way.
+        """
+        with transaction.atomic():
+            if self._account_verified_organizer(lock=True):
+                raise ValidationError({"account": _VERIFIER_MEMBER})
+            super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        if self._account_verified_organizer(lock=False):
+            raise ValidationError({"account": _VERIFIER_MEMBER})
+
+    def _account_verified_organizer(self, *, lock: bool) -> bool:
+        """True when ``account`` is the Organizer's ``verified_by``."""
+        if self.organizer_id is None or self.account_id is None:
+            # Field validation reports a missing link.
+            return False
+        organizers = Organizer.objects.filter(pk=self.organizer_id)
+        if lock:
+            organizers = organizers.select_for_update()
+        verified_by = organizers.values_list("verified_by_id", flat=True).first()
+        return verified_by is not None and verified_by == self.account_id
 
 
 class ClubRole(models.Model):
