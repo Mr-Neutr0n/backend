@@ -8,9 +8,11 @@ The function takes plain values and does no database access.
 Players are any hashable reference, since each path resolves players its
 own way, but each player must be given as exactly one canonical reference:
 a resolved Player, or an OPEN Code already passed through
-``apps.public_ids.codes.normalize()``. Never pass raw input. The duplicate
-and both-teams checks compare references by equality, so two spellings of
-one code would count as two players. Teams and the game list are lists or
+``apps.public_ids.codes.normalize()``. Never pass raw input. Every
+reference in one call must be the same kind (the same type): a call that
+mixes kinds is refused with ``mixed_player_references``. The duplicate and
+both-teams checks compare references by equality, so two spellings of one
+code, or a Player and its code, would count as two players. Teams and the game list are lists or
 tuples; anything else (a string, a generator, a dict) is an issue.
 
 Defaults: a missing game target means 11 and a missing scoring type means
@@ -164,16 +166,24 @@ def _team_issues(
 ) -> tuple[list[MatchIssue], tuple[Hashable, ...] | None, tuple[Hashable, ...] | None]:
     """Check both teams. Returns the issues and each usable team, or None."""
     issues: list[MatchIssue] = []
+    teams = (("team_a", "Team A", team_a), ("team_b", "Team B", team_b))
     players: dict[str, tuple[Hashable, ...] | None] = {}
-    for field, label, team in (
-        ("team_a", "Team A", team_a),
-        ("team_b", "Team B", team_b),
-    ):
-        issue, members = _team_players(field, label, team)
-        players[field] = members
-        if issue is not None or members is None:
-            if issue is not None:
-                issues.append(issue)
+    for field, label, team in teams:
+        issue, players[field] = _team_players(field, label, team)
+        if issue is not None:
+            issues.append(issue)
+    a, b = players["team_a"], players["team_b"]
+    # A Player never equals its code, so the equality checks below cannot
+    # be trusted unless every reference is the same kind.
+    mixed = (
+        a is not None
+        and b is not None
+        and len({type(player) for player in (*a, *b)}) > 1
+    )
+
+    for field, label, _team in teams:
+        members = players[field]
+        if members is None:
             continue
         if match_format is not None:
             size = PLAYERS_PER_TEAM[match_format]
@@ -187,14 +197,21 @@ def _team_issues(
                         f"{match_format.label.lower()}.",
                     )
                 )
-        if len(set(members)) != len(members):
+        if not mixed and len(set(members)) != len(members):
             issues.append(
                 MatchIssue(
                     field, "duplicate_player", f"{label} lists a player more than once."
                 )
             )
-    a, b = players["team_a"], players["team_b"]
-    if a is not None and b is not None and set(a) & set(b):
+    if mixed:
+        issues.append(
+            MatchIssue(
+                "team_b",
+                "mixed_player_references",
+                "Give every player the same kind of reference.",
+            )
+        )
+    elif a is not None and b is not None and set(a) & set(b):
         issues.append(
             MatchIssue(
                 "team_b", "player_on_both_teams", "A player cannot be on both teams."
