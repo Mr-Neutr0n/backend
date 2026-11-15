@@ -45,6 +45,10 @@ _Avoid_: venue, team.
 **Club Role**:
 An Account's role at a Club: admin or match manager. #79 sets what each role may do. Backend: `clubs.ClubRole`.
 
+**Event**:
+A tournament, league, or verified rec play that an Organizer runs, optionally at a Club, from a start date to an end date. Its kind is the Match Type its matches count as: `tournament`, `league`, or `rec_verified`. Self-reported matches have no Event. An Event also stores a per-event weight from 0.01 to 1.00, which is not applied to ratings. Backend: `events.Event`.
+_Avoid_: competition.
+
 **Partner**:
 An app, league platform, club, or tournament that integrates with OPEN through the APIs. Partners use OPEN for free.
 _Avoid_: customer, client, vendor.

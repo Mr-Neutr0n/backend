@@ -14,7 +14,7 @@ Planned services, from the project roadmap:
 
 ## Current status
 
-The Django project scaffold exists (`config`, with settings read from the environment, plus `apps/accounts` with the custom email-login user model and the first migration, `apps/audit` with the append-only audit log (`AuditEvent`, `record_event`), `apps/public_ids` with OPEN Codes (`PublicCodeModel`, the `IssuedCode` registry, the `PublicCodePath` path parameter), `apps/players` with `Player` and `PlayerPrivacy` and their services (no API, no admin), `apps/clubs` with `Club`, `Organizer`, `OrganizerMember`, and `ClubRole`, the organizer verification services, and their admin (no API), `config/api.py` with the django-ninja API mounted at `/api/v1/` with the health checks in `config/health.py` as its only operations so far, the Celery app in `config/celery.py`, configured in the Celery section of `config/settings.py` (four queues, django-celery-beat), static files through WhiteNoise, CORS for `/api/` through django-cors-headers, `gunicorn.conf.py` for serving, and `compose.yaml` for local services), and no OPEN rating is live. The work is planned as GitHub issues grouped into outcome milestones (v0.1 MVP through v0.4), epics with sub-issues, native blocked-by links, and the "OPEN backend" org project board. Issue #1 records the plan's decisions and open questions; other issues cite them as "decisions Qn" or "Fn". Read the relevant ones before starting an issue.
+The Django project scaffold exists (`config`, with settings read from the environment, plus `apps/accounts` with the custom email-login user model and the first migration, `apps/audit` with the append-only audit log (`AuditEvent`, `record_event`), `apps/public_ids` with OPEN Codes (`PublicCodeModel`, the `IssuedCode` registry, the `PublicCodePath` path parameter), `apps/players` with `Player` and `PlayerPrivacy` and their services (no API, no admin), `apps/clubs` with `Club`, `Organizer`, `OrganizerMember`, and `ClubRole`, the organizer verification services, and their admin (no API), `apps/events` with `Event` and its admin (no API), `config/api.py` with the django-ninja API mounted at `/api/v1/` with the health checks in `config/health.py` as its only operations so far, the Celery app in `config/celery.py`, configured in the Celery section of `config/settings.py` (four queues, django-celery-beat), static files through WhiteNoise, CORS for `/api/` through django-cors-headers, `gunicorn.conf.py` for serving, and `compose.yaml` for local services), and no OPEN rating is live. The work is planned as GitHub issues grouped into outcome milestones (v0.1 MVP through v0.4), epics with sub-issues, native blocked-by links, and the "OPEN backend" org project board. Issue #1 records the plan's decisions and open questions; other issues cite them as "decisions Qn" or "Fn". Read the relevant ones before starting an issue.
 
 ## Stack (decided, see issue #1)
 
@@ -60,10 +60,20 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 ## Clubs and organizers
 
 - A verified Organizer's submissions count as confirmed, so verification is a security-sensitive area (hard rule 8). Change `Organizer.verified_at` and `verified_by` only through `apps.clubs.services.verify_organizer()` and `unverify_organizer()`. They refuse any actor but an active Account with the `clubs.verify_organizer` permission that is not a member of that Organizer, and record one Audit Event when the status changes. The `Organizer.save()` docstring lists the writes that skip them; `bulk_create` and `loaddata` skip them too (see Public identifiers).
-- While an Organizer is verified, the Account that verified it cannot become its member (`bulk_create` and `QuerySet.update` skip this check). A verified Organizer cannot be deleted: unverify it first (`QuerySet.delete()` skips this check).
+- While an Organizer is verified, the Account that verified it cannot become its member (`bulk_create` and `QuerySet.update` skip this check). A verified Organizer cannot be deleted: unverify it first (`QuerySet.delete()` skips this check). An Organizer with an Event cannot be deleted either, even through `QuerySet.delete()` (see Events).
 - `OrganizerMember.account` uses `PROTECT`, so an Account that is a member cannot be hard-deleted. `Organizer.verified_by` uses `PROTECT` while the Organizer is verified; after that, the verify event's actor keeps the Account row (Audit log). `ClubRole.account` cascades.
 - Every Organizer's name may be a person's name, so it is an identifying field. #116 carries out what ADR 0009's Retention section decides for memberships, Club Roles, and Organizer names.
 - The permission rules that use these roles are #79. Membership and role changes record no Audit Event until #158 lands.
+
+## Events
+
+- An Event's `kind` is the Match Type its matches count as. Its values are the engine's `MatchType` values except `self_reported`, since self-reported matches have no Event (decision F1). Never add a value the engine lacks.
+- `Event.weight` (0.01 to 1.00, default 1.00) is stored but not applied to ratings: the engine takes no per-event weight (openpickleball/engine#30). No backend code may apply it (hard rule 2).
+- `Event.organizer` and `Event.club` use `PROTECT`, so an Organizer or Club with an Event cannot be deleted.
+- Event fields override Django's default messages that include the submitted value: an invalid choice, number, or date, and a foreign key that names no row (whose default names the row id).
+- A form that edits an Event subclasses `apps.events.admin.EventAdminForm`, and an override of its `clean()` calls `super().clean()`. The form gives `kind` a message without the value (a ModelForm's choice field repeats it), and its `clean()` clears a date that failed, so the model's order check does not compare the other new date with the stored one.
+- Event changes record no Audit Event until #125 lands.
+- In tests, build Events with `EventFactory` (`apps/events/tests/factories.py`).
 
 ## Public identifiers
 
@@ -79,7 +89,7 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - Only the player sets their own display name, legal name, birth year and month, gender division, and city and region. Others may only remove them (#114, #116).
 - Every path that creates a Player refuses anyone under 13, and a new Player always has a birth year and month. Players aged 13 to 17 are left out of all partner sharing. A Player whose birth year and month were removed (#114, #116) is excluded from all partner sharing, permanently.
 - The identifying personal data fields are email, display name, legal name, birth year and month, gender division, city and region, an Organizer's name (`clubs.Organizer.name`), External IDs (#49), and platform player IDs (#82). An Audit Event about one of them records the field's name, never its value. Account deletion is wider: it removes all personal data except what ADR 0009's Retention section keeps.
-- No model's `__str__` returns an identifying field, so the admin log's `object_repr` and admin messages never hold one (a Player's, a Club's, and an Organizer's return their OPEN Code). `accounts.User.__str__` returns the email, the known exception: #116 clears the admin log entries tied to a deleted Account.
+- No model's `__str__` returns an identifying field, so the admin log's `object_repr` and admin messages never hold one (a Player's, a Club's, an Organizer's, and an Event's return their OPEN Code). `accounts.User.__str__` returns the email, the known exception: #116 clears the admin log entries tied to a deleted Account.
 
 ## API
 
