@@ -278,6 +278,27 @@ AUTH_USER_MODEL = "accounts.User"
 # Q3). Fixed once migrations exist, like AUTH_USER_MODEL.
 OAUTH2_PROVIDER_APPLICATION_MODEL = "partners.PartnerApplication"
 
+# django-oauth-toolkit adopts every RFC 9700 (OAuth 2.0 Security BCP)
+# behavior now, ahead of its 4.0 defaults: tokens hashed at rest, no
+# implicit or password grant, no plain PKCE, no token in the query string,
+# refresh token replay revokes the family, https redirect URIs only. The
+# config gates make a later insecure value fail `check --deploy`. Scopes,
+# lifetimes, and grant types are #28.
+OAUTH2_PROVIDER = {
+    "COMPLIANT_BCP_RFC9700_IMPLICIT_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_PASSWORD_GRANT": True,
+    "COMPLIANT_BCP_RFC9700_PKCE_METHOD": True,
+    "COMPLIANT_BCP_RFC9700_ACCESS_TOKEN_TRANSPORT": True,
+    "COMPLIANT_BCP_RFC9700_AUTHZ_RESPONSE_ISS": True,
+    "COMPLIANT_BCP_RFC9700_TOKEN_STORAGE": True,
+    "COMPLIANT_BCP_RFC9700_REFRESH_TOKEN": True,
+    "COMPLIANT_BCP_RFC9700_REDIRECT_URI_SCHEME": True,
+    "COMPLIANT_BCP_RFC9700_REDIRECT_URI_MATCHING": True,
+    "COMPLIANT_BCP_RFC9700_PKCE_REQUIRED": True,
+    "REFRESH_TOKEN_REUSE_PROTECTION": True,
+    "ALLOWED_REDIRECT_URI_SCHEMES": ["https"],
+}
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     # Serves the collected static files. It must come right after
