@@ -8,7 +8,7 @@ are #79.
 
 import unicodedata
 from collections.abc import Collection
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -23,6 +23,8 @@ from apps.public_ids.models import PublicCodeModel
 _CHOICE_MESSAGES = {"invalid_choice": "Choose one of the listed options."}
 _CONTROL_CHARACTER = "Remove control or invalid characters."
 _NOT_TEXT = "Enter text."
+# Written only by apps.clubs.services.
+VERIFICATION_FIELDS = ("verified_at", "verified_by")
 # Control characters (Postgres cannot store NUL) and lone surrogates
 # (not encodable as UTF-8).
 _REFUSED_CATEGORIES = frozenset({"Cc", "Cs"})
@@ -150,6 +152,26 @@ class Organizer(_CleanedTextModel):
     @property
     def is_verified(self) -> bool:
         return self.verified_at is not None
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Save, never writing verification unless the services ask.
+
+        A full save of an existing Organizer writes every loaded field
+        except ``verified_at`` and ``verified_by``, so an instance loaded
+        before a verify or unverify cannot write the old status back.
+        Only an explicit ``update_fields`` (what the services pass) writes
+        them.
+        """
+        if not self._state.adding and kwargs.get("update_fields") is None:
+            deferred = self.get_deferred_fields()
+            kwargs["update_fields"] = [
+                field.name
+                for field in self._meta.concrete_fields
+                if not field.primary_key
+                and field.attname not in deferred
+                and field.name not in VERIFICATION_FIELDS
+            ]
+        super().save(*args, **kwargs)
 
 
 class OrganizerMember(models.Model):
