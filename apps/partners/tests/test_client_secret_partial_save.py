@@ -23,13 +23,14 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.django_db
 
 RAW_SECRET = "made-up-client-secret-for-tests-only"
+HASH_SHAPED = "argon2$argon2id$x"
 
 
 def _stored_secret(pk: int) -> str:
     return PartnerApplication.objects.values_list("client_secret", flat=True).get(pk=pk)
 
 
-@pytest.mark.parametrize("secret", ["", "argon2$argon2id$x"])
+@pytest.mark.parametrize("secret", [""])
 def test_name_only_save_then_full_save_is_refused(secret: str) -> None:
     application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
     loaded = PartnerApplication.objects.get(pk=application.pk)
@@ -44,7 +45,7 @@ def test_name_only_save_then_full_save_is_refused(secret: str) -> None:
     assert _stored_secret(application.pk) == before
 
 
-@pytest.mark.parametrize("secret", ["", "argon2$argon2id$x"])
+@pytest.mark.parametrize("secret", [""])
 def test_approval_save_then_full_save_is_refused(secret: str) -> None:
     approver: _User = UserFactory.create(is_staff=True)
     application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
@@ -57,6 +58,34 @@ def test_approval_save_then_full_save_is_refused(secret: str) -> None:
     loaded.save(update_fields=["approved_at", "approved_by"])
     with pytest.raises(ValueError, match="client secret"):
         loaded.save()
+
+    assert _stored_secret(application.pk) == before
+
+
+def test_name_only_save_then_full_save_keeps_stored_hash() -> None:
+    application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
+    loaded = PartnerApplication.objects.get(pk=application.pk)
+    before = _stored_secret(application.pk)
+
+    loaded.client_secret = HASH_SHAPED
+    loaded.name = "Made-up Renamed App"
+    loaded.save(update_fields=["name"])
+    loaded.save()
+
+    assert _stored_secret(application.pk) == before
+
+
+def test_approval_save_then_full_save_keeps_stored_hash() -> None:
+    approver: _User = UserFactory.create(is_staff=True)
+    application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
+    loaded = PartnerApplication.objects.get(pk=application.pk)
+    before = _stored_secret(application.pk)
+
+    loaded.client_secret = HASH_SHAPED
+    loaded.approved_at = timezone.now()
+    loaded.approved_by = approver
+    loaded.save(update_fields=["approved_at", "approved_by"])
+    loaded.save()
 
     assert _stored_secret(application.pk) == before
 

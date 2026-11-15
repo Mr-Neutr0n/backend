@@ -27,7 +27,7 @@ def _defer_secret() -> QuerySet[PartnerApplication]:
 
 
 @pytest.mark.parametrize("queryset", [_only_name, _defer_secret])
-@pytest.mark.parametrize("secret", ["", "argon2$argon2id$x"])
+@pytest.mark.parametrize("secret", [""])
 def test_refresh_skipping_the_secret_then_save_is_refused(
     secret: str, queryset: Callable[[], QuerySet[PartnerApplication]]
 ) -> None:
@@ -41,6 +41,26 @@ def test_refresh_skipping_the_secret_then_save_is_refused(
     loaded.refresh_from_db(from_queryset=queryset())
     with pytest.raises(ValueError, match="client secret"):
         loaded.save()
+
+    stored = PartnerApplication.objects.values_list("client_secret", flat=True).get(
+        pk=application.pk
+    )
+    assert stored == before
+
+
+@pytest.mark.parametrize("queryset", [_only_name, _defer_secret])
+def test_refresh_skipping_the_secret_then_save_keeps_stored_hash(
+    queryset: Callable[[], QuerySet[PartnerApplication]],
+) -> None:
+    application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
+    loaded = PartnerApplication.objects.get(pk=application.pk)
+    before = PartnerApplication.objects.values_list("client_secret", flat=True).get(
+        pk=application.pk
+    )
+
+    loaded.client_secret = "argon2$argon2id$x"
+    loaded.refresh_from_db(from_queryset=queryset())
+    loaded.save()
 
     stored = PartnerApplication.objects.values_list("client_secret", flat=True).get(
         pk=application.pk

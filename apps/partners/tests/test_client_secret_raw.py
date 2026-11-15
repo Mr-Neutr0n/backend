@@ -68,7 +68,7 @@ def test_clean_refuses_raw_secret(secret: str) -> None:
         assert secret not in str(caught.value)
 
 
-@pytest.mark.parametrize("secret", [*BLANK, *HASH_SHAPED])
+@pytest.mark.parametrize("secret", BLANK)
 def test_existing_secret_changed_to_raw_is_refused(secret: str) -> None:
     application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
     stored = PartnerApplication.objects.get(pk=application.pk)
@@ -79,6 +79,24 @@ def test_existing_secret_changed_to_raw_is_refused(secret: str) -> None:
         stored.save()
     with pytest.raises(ValidationError):
         stored.full_clean()
+
+    assert (
+        PartnerApplication.objects.values_list("client_secret", flat=True).get(
+            pk=application.pk
+        )
+        == before
+    )
+
+
+@pytest.mark.parametrize("secret", HASH_SHAPED)
+def test_existing_secret_set_hash_shaped_is_not_written(secret: str) -> None:
+    application = PartnerApplicationFactory.create(client_secret=RAW_SECRET)
+    stored = PartnerApplication.objects.get(pk=application.pk)
+    before = stored.client_secret
+
+    stored.client_secret = secret
+    stored.save()
+    stored.full_clean()
 
     assert (
         PartnerApplication.objects.values_list("client_secret", flat=True).get(
