@@ -3,9 +3,15 @@
 Every path that submits a Match (the results API, CSV upload, organizer
 tools, partner imports) calls ``validate_match`` before it writes anything,
 so an impossible score never reaches the ledger (CLAUDE.md, hard rule 3).
-The function takes plain values and does no database access. Players are
-any hashable reference (a Player, an OPEN Code, a CSV row key), since each
-path resolves players its own way.
+The function takes plain values and does no database access.
+
+Players are any hashable reference, since each path resolves players its
+own way, but each player must be given as exactly one canonical reference:
+a resolved Player, or an OPEN Code already passed through
+``apps.public_ids.codes.normalize()``. Never pass raw input. The duplicate
+and both-teams checks compare references by equality, so two spellings of
+one code would count as two players. Teams and the game list are lists or
+tuples; anything else (a string, a generator, a dict) is an issue.
 
 Defaults: a missing game target means 11 and a missing scoring type means
 side-out. A missing best-of is inferred by ``infer_best_of``: the smallest
@@ -129,41 +135,72 @@ def infer_best_of(winners: Sequence[Team]) -> BestOf | None:
     return None
 
 
+def _team_players(
+    field: str, label: str, team: object
+) -> tuple[MatchIssue | None, tuple[Hashable, ...] | None]:
+    """A team's players, or the issue that makes them unusable.
+
+    A team is a list or tuple. A string or bytes is refused, not read one
+    player per character. Each player is hashable and not None.
+    """
+    if not isinstance(team, list | tuple):
+        return MatchIssue(
+            field, "invalid", f"Enter {label} as a list of players."
+        ), None
+    for player in team:
+        try:
+            hash(player)
+        except TypeError:
+            player = None
+        if player is None:
+            return MatchIssue(
+                field, "invalid_player", f"{label} lists a player that is not valid."
+            ), None
+    return None, tuple(team)
+
+
 def _team_issues(
-    match_format: MatchFormat | None,
-    team_a: Sequence[Hashable],
-    team_b: Sequence[Hashable],
-) -> list[MatchIssue]:
+    match_format: MatchFormat | None, team_a: object, team_b: object
+) -> tuple[list[MatchIssue], tuple[Hashable, ...] | None, tuple[Hashable, ...] | None]:
+    """Check both teams. Returns the issues and each usable team, or None."""
     issues: list[MatchIssue] = []
+    players: dict[str, tuple[Hashable, ...] | None] = {}
     for field, label, team in (
         ("team_a", "Team A", team_a),
         ("team_b", "Team B", team_b),
     ):
+        issue, members = _team_players(field, label, team)
+        players[field] = members
+        if issue is not None or members is None:
+            if issue is not None:
+                issues.append(issue)
+            continue
         if match_format is not None:
             size = PLAYERS_PER_TEAM[match_format]
-            if len(team) != size:
-                players = "player" if size == 1 else "players"
+            if len(members) != size:
+                noun = "player" if size == 1 else "players"
                 issues.append(
                     MatchIssue(
                         field,
                         "team_size",
-                        f"{label} must have {size} {players} in "
+                        f"{label} must have {size} {noun} in "
                         f"{match_format.label.lower()}.",
                     )
                 )
-        if len(set(team)) != len(team):
+        if len(set(members)) != len(members):
             issues.append(
                 MatchIssue(
                     field, "duplicate_player", f"{label} lists a player more than once."
                 )
             )
-    if set(team_a) & set(team_b):
+    a, b = players["team_a"], players["team_b"]
+    if a is not None and b is not None and set(a) & set(b):
         issues.append(
             MatchIssue(
                 "team_b", "player_on_both_teams", "A player cannot be on both teams."
             )
         )
-    return issues
+    return issues, a, b
 
 
 def _game_issue(
@@ -249,7 +286,8 @@ def validate_match(
         match_format = MatchFormat(format)
     else:
         issues.append(MatchIssue("format", "invalid_choice", _FORMAT_CHOICE))
-    issues.extend(_team_issues(match_format, team_a, team_b))
+    team_issues, players_a, players_b = _team_issues(match_format, team_a, team_b)
+    issues.extend(team_issues)
 
     scoring: ScoringType | None = ScoringType.SIDE_OUT
     if scoring_type is not None:
@@ -278,21 +316,29 @@ def validate_match(
 
     scores: list[tuple[int, int]] = []
     games_valid = True
-    if len(games) == 0:
+    if not isinstance(games, list | tuple):
+        # A string, a generator, or a dict is not read as games.
+        games_valid = False
+        issues.append(
+            MatchIssue("games", "invalid", "Enter the games as a list of scores.")
+        )
+    elif len(games) == 0:
         games_valid = False
         issues.append(MatchIssue("games", "no_games", "Enter at least one game."))
     elif len(games) > MAX_GAMES:
+        # One issue, not one per game of an oversized list.
         games_valid = False
         issues.append(
             MatchIssue("games", "too_many_games", f"Enter at most {MAX_GAMES} games.")
         )
-    for index, game in enumerate(games):
-        issue, score = _game_issue(index, game, target)
-        if issue is not None:
-            games_valid = False
-            issues.append(issue)
-        elif score is not None:
-            scores.append(score)
+    else:
+        for index, game in enumerate(games):
+            issue, score = _game_issue(index, game, target)
+            if issue is not None:
+                games_valid = False
+                issues.append(issue)
+            elif score is not None:
+                scores.append(score)
     if target is None:
         # Without a valid target the games' outcome cannot be trusted.
         games_valid = False
@@ -328,6 +374,8 @@ def validate_match(
     if (
         issues
         or match_format is None
+        or players_a is None
+        or players_b is None
         or scoring is None
         or target is None
         or chosen_best_of is None
@@ -336,8 +384,8 @@ def validate_match(
         raise MatchValidationError(issues)
     return ValidatedMatch(
         format=match_format,
-        team_a=tuple(team_a),
-        team_b=tuple(team_b),
+        team_a=players_a,
+        team_b=players_b,
         games=tuple(scores),
         played_on=played_on,
         best_of=chosen_best_of,
