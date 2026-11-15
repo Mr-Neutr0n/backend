@@ -168,14 +168,21 @@ class Organizer(_CleanedTextModel):
         return self.verified_at is not None
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        """Save, never writing verification unless the services ask.
+        """Save, without writing verification on a full save.
 
         A full save of an existing Organizer writes every loaded field
         except ``verified_at`` and ``verified_by``, so an instance loaded
-        before a verify or unverify cannot write the old status back.
-        Only an explicit ``update_fields`` (what the services pass) writes
-        them. A new Organizer must start unverified, so a copy of a
-        verified one is refused before any code is issued.
+        before a verify or unverify cannot write the old status back. A
+        new Organizer must start unverified, so a copy of a verified one is
+        refused before any code is issued.
+
+        These still write verification with no actor check and no Audit
+        Event, so never use them for it: an explicit ``update_fields``
+        that names either field (the services pass one, under a lock),
+        ``update_or_create`` with either field in ``defaults`` (it saves
+        with those ``update_fields``), and, like any raw write,
+        ``QuerySet.update``, ``bulk_update``, and raw SQL. Change
+        verification only through ``apps.clubs.services``.
         """
         if self._state.adding:
             if self.verified_at is not None or self.verified_by_id is not None:
