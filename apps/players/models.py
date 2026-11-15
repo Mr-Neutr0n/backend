@@ -33,9 +33,11 @@ _CONTROL_CHARACTER = "Remove control or invalid characters."
 # (not encodable as UTF-8).
 _REFUSED_CATEGORIES = frozenset({"Cc", "Cs"})
 # Letters and symbols that render blank.
-_FILLERS = frozenset({"\u115f", "\u1160", "\u3164", "\uffa0", "\u2800"})
-# Letters, numbers, punctuation, and symbols.
-_VISIBLE_CATEGORY_GROUPS = ("L", "N", "P", "S")
+_FILLERS = frozenset({"\u115f", "\u1160", "\u3164", "\uffa0", "\u2800", "\U0001d159"})
+# Letters, numbers, punctuation, and symbols, plus characters unassigned
+# in Python's Unicode data (Cn): newer scripts and emoji land there until
+# Python catches up.
+_VISIBLE_CATEGORY_GROUPS = ("L", "N", "P", "S", "Cn")
 
 # Text fields stripped and checked for control characters before field
 # validation, so max_length counts the stored value.
@@ -193,10 +195,11 @@ def _has_visible_character(value: object) -> bool:
     """True when ``value`` has at least one character that renders.
 
     That is a letter, number, punctuation mark, or symbol (L*, N*, P*,
-    S*) other than a filler that renders blank. Spaces, control and
-    format characters, combining marks, private-use, and unassigned
-    characters do not count on their own, though they may appear next to
-    one that does.
+    S*), or a character unassigned in Python's Unicode data (Cn, which
+    holds newer scripts and emoji), other than a filler that renders
+    blank. Spaces, control and format characters, combining marks, and
+    private-use characters do not count on their own, though they may
+    appear next to one that does.
     """
     if not isinstance(value, str):
         return False
