@@ -33,7 +33,17 @@ The gender division a Player enters for divisions and gender-specific Rating For
 _Avoid_: gender, sex.
 
 **Organizer**:
-A verified person or body that submits results on behalf of an event, club, league, or tournament. An Organizer submission counts as confirmed.
+A person or body that runs events and submits results on behalf of an event, club, league, or tournament. An Organizer is unverified until OPEN staff verify it. A verified Organizer's submission counts as confirmed. A person who organizes alone is an Organizer with one Organizer Member. Backend: `clubs.Organizer`.
+
+**Organizer Member**:
+An Account that acts for an Organizer, with a role: admin or match manager. The Account that verified an Organizer cannot be its member. Backend: `clubs.OrganizerMember`.
+
+**Club**:
+A place or group where players play, with a name, city, and region. Backend: `clubs.Club`.
+_Avoid_: venue, team.
+
+**Club Role**:
+An Account's role at a Club: admin or match manager. #79 sets what each role may do. Backend: `clubs.ClubRole`.
 
 **Partner**:
 An app, league platform, club, or tournament that integrates with OPEN through the APIs. Partners use OPEN for free.
