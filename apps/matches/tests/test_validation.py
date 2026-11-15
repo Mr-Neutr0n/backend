@@ -12,12 +12,14 @@ from datetime import timezone as dt_timezone
 from typing import Any
 
 import pytest
+from django.utils import timezone
 
 from apps.matches.models import (
     MAX_GAMES,
     MAX_UTC_OFFSET_MINUTES,
     BestOf,
     GameTarget,
+    Match,
     MatchFormat,
     ScoringType,
     Team,
@@ -29,6 +31,7 @@ from apps.matches.services import (
     infer_best_of,
     validate_match,
 )
+from apps.matches.tests.factories import DoublesMatchFactory, MatchFactory
 
 # Numbers a message may contain: game numbers, the win margin, and the
 # allowed best-of and target values. A submitted score outside this set
@@ -36,6 +39,7 @@ from apps.matches.services import (
 _SAFE_NUMBERS = {1, 2, 3, 4, 5, *BestOf.values, *GameTarget.values}
 
 _NOW = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+_REAL_NOW = timezone.now
 _PAST = date(2026, 6, 1)
 
 SINGLES_A = ("player-a1",)
@@ -537,3 +541,45 @@ def test_the_signature_takes_only_match_values() -> None:
         parameter.kind is inspect.Parameter.KEYWORD_ONLY
         for parameter in parameters.values()
     )
+
+
+# The factories build matches these rules accept.
+def _validate_stored(match: Match) -> ValidatedMatch:
+    def team(side: str) -> tuple[Hashable, ...]:
+        return tuple(
+            participant.player.public_code
+            for participant in match.participants.filter(team=side).order_by("pk")
+        )
+
+    return validate_match(
+        format=match.format,
+        team_a=team(Team.A),
+        team_b=team(Team.B),
+        games=[
+            (game.team_a_score, game.team_b_score)
+            for game in match.games.order_by("game_number")
+        ],
+        played_on=match.played_on,
+        best_of=match.best_of,
+        game_target=match.game_target,
+        scoring_type=match.scoring_type,
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("factory", [MatchFactory, DoublesMatchFactory])
+@pytest.mark.parametrize("best_of", ["best_of_1", "best_of_3", "best_of_5"])
+@pytest.mark.parametrize("scoring", ["side_out", "rally"])
+def test_factory_matches_pass_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    factory: type[MatchFactory],
+    best_of: str,
+    scoring: str,
+) -> None:
+    # Factory dates run up to today, so use the real clock.
+    monkeypatch.setattr("apps.matches.services.timezone.now", _REAL_NOW)
+    for _ in range(3):
+        match = factory.create(**{best_of: True, scoring: True})
+        result = _validate_stored(match)
+        assert result.best_of == match.best_of
+        assert result.scoring_type == match.scoring_type
