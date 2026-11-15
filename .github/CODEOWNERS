@@ -32,5 +32,8 @@
 # Application Grants, which decide who may submit a club's matches.
 /apps/partners/ @openpickleball/maintainers
 
+# The match ledger, append-only (hard rule 3).
+/apps/matches/ @openpickleball/maintainers
+
 # CI, the DCO check, and this file.
 /.github/ @openpickleball/maintainers
