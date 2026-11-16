@@ -637,6 +637,43 @@ def _player_keys(team: object) -> list[int]:
     return keys
 
 
+def _clean_all(
+    match: Match, participants: Sequence[MatchParticipant], games: Sequence[Game]
+) -> None:
+    """Run every model's field and clean() rules, before anything is written.
+
+    Raises one ``MatchValidationError`` with every issue. The unique
+    constraints are left to the duplicate checks and the database: a
+    conflict that slips past the checks becomes ``DuplicateMatchError`` on
+    insert. A game's issues go under ``games.<i>`` and a participant's
+    under its team's field.
+    """
+    issues: list[MatchIssue] = []
+    try:
+        match.full_clean(validate_constraints=False)
+    except ValidationError as error:
+        issues.extend(_issues_from_validation_error(error))
+    for participant in participants:
+        field = "team_a" if participant.team == Team.A else "team_b"
+        try:
+            participant.full_clean(exclude=["match"], validate_constraints=False)
+        except ValidationError as error:
+            issues.extend(
+                MatchIssue(field, issue.code, issue.message)
+                for issue in _issues_from_validation_error(error)
+            )
+    for index, game in enumerate(games):
+        try:
+            game.full_clean(exclude=["match"], validate_constraints=False)
+        except ValidationError as error:
+            issues.extend(
+                MatchIssue(f"games.{index}", issue.code, issue.message)
+                for issue in _issues_from_validation_error(error)
+            )
+    if issues:
+        raise MatchValidationError(issues)
+
+
 def _save_new(match: Match) -> None:
     """Insert the Match, turning a duplicate constraint into DuplicateMatchError.
 
@@ -710,12 +747,45 @@ def record_match(
         keys_a, keys_b, validated.played_on, validated.games
     )
 
+    match = Match(
+        format=validated.format,
+        played_on=validated.played_on,
+        best_of=validated.best_of,
+        game_target=validated.game_target,
+        scoring_type=validated.scoring_type,
+        submitted_by_user=submitted_by_user,
+        submitted_by_application=submitted_by_application,
+        external_id=external_id,
+        event=event,
+        club=club,
+        played_at=played_at,
+        played_at_utc_offset=played_at_utc_offset,
+        location=location,
+        event_label=event_label,
+        bracket_label=bracket_label,
+        sequence=sequence,
+        fingerprint=fingerprint,
+    )
+    participants = [
+        MatchParticipant(match=match, player_id=key, team=team)
+        for team, keys in ((Team.A, keys_a), (Team.B, keys_b))
+        for key in keys
+    ]
+    game_rows = [
+        Game(match=match, game_number=number, team_a_score=a, team_b_score=b)
+        for number, (a, b) in enumerate(validated.games, start=1)
+    ]
+    # Every model rule runs before any lock, lookup, or write. Among other
+    # things this strips external_id, so the lookup below uses the stored
+    # form.
+    _clean_all(match, participants, game_rows)
+
     with transaction.atomic():
-        if external_id and submitted_by_application is not None:
+        if match.external_id and submitted_by_application is not None:
             _advisory_lock(
-                _external_id_lock_key(submitted_by_application.pk, external_id)
+                _external_id_lock_key(submitted_by_application.pk, match.external_id)
             )
-            existing = _external_id_match(submitted_by_application, external_id)
+            existing = _external_id_match(submitted_by_application, match.external_id)
             if existing is not None:
                 raise DuplicateMatchError(
                     DuplicateKind.DUPLICATE_EXTERNAL_ID, existing.public_code
@@ -729,48 +799,11 @@ def record_match(
             )
         near = _near_matches(keys_a, keys_b, validated.played_on)
 
-        match = Match(
-            format=validated.format,
-            played_on=validated.played_on,
-            best_of=validated.best_of,
-            game_target=validated.game_target,
-            scoring_type=validated.scoring_type,
-            submitted_by_user=submitted_by_user,
-            submitted_by_application=submitted_by_application,
-            external_id=external_id,
-            event=event,
-            club=club,
-            played_at=played_at,
-            played_at_utc_offset=played_at_utc_offset,
-            location=location,
-            event_label=event_label,
-            bracket_label=bracket_label,
-            sequence=sequence,
-            fingerprint=fingerprint,
-        )
-        try:
-            # The fields and clean() cover every check constraint. The
-            # unique constraints are the duplicate rules above: a conflict
-            # that slips past them is turned into DuplicateMatchError on
-            # insert, not reported as a validation error.
-            match.full_clean(validate_constraints=False)
-        except ValidationError as error:
-            raise MatchValidationError(_issues_from_validation_error(error)) from None
         _save_new(match)
-
-        MatchParticipant.objects.bulk_create(
-            [
-                MatchParticipant(match=match, player_id=key, team=team)
-                for team, keys in ((Team.A, keys_a), (Team.B, keys_b))
-                for key in keys
-            ]
-        )
-        Game.objects.bulk_create(
-            [
-                Game(match=match, game_number=number, team_a_score=a, team_b_score=b)
-                for number, (a, b) in enumerate(validated.games, start=1)
-            ]
-        )
+        for row in (*participants, *game_rows):
+            row.match = match
+        MatchParticipant.objects.bulk_create(participants)
+        Game.objects.bulk_create(game_rows)
         MatchFlag.objects.bulk_create(
             [
                 MatchFlag(
