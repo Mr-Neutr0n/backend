@@ -46,6 +46,7 @@ import logging
 from collections.abc import Iterable, Sequence
 from datetime import date, datetime, timedelta
 
+from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
@@ -534,7 +535,9 @@ def expire_unconfirmed_matches(now: datetime | None = None) -> int:
     until the next run, and a match no longer pending is left alone, so
     running twice is safe. Returns how many matches were voided. A match
     that fails rolls back alone and is logged by id; the run goes on, then
-    raises ``ExpiryFailed`` with how many failed.
+    raises ``ExpiryFailed`` with how many failed. The task's soft time
+    limit (``SoftTimeLimitExceeded``) is not a failed match: it stops the
+    run at once, keeping the matches already expired.
     """
     days: int | None = settings.MATCH_CONFIRMATION_EXPIRY_DAYS
     if days is None:
@@ -551,6 +554,10 @@ def expire_unconfirmed_matches(now: datetime | None = None) -> int:
         try:
             if _expire_one(pk, cutoff):
                 expired += 1
+        except SoftTimeLimitExceeded:
+            # Out of time: stop cleanly. Matches already expired stay
+            # committed, and the rest wait for the next run.
+            raise
         except Exception:
             # Its transaction has rolled back. Log the id only: the error's
             # text could hold anything. The other matches still expire.
