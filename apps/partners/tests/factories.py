@@ -1,11 +1,19 @@
 """Factories for Partner Applications. Made-up data only."""
 
+from typing import Any
+
+from django.utils import timezone
 from factory.declarations import LazyFunction, SubFactory
 from factory.django import DjangoModelFactory
 from faker import Faker
 
+from apps.accounts.tests.factories import UserFactory
 from apps.clubs.tests.factories import ClubFactory
-from apps.partners.models import ClubApplicationGrant, PartnerApplication
+from apps.partners.models import (
+    APPROVAL_FIELDS,
+    ClubApplicationGrant,
+    PartnerApplication,
+)
 
 _faker = Faker()
 
@@ -34,3 +42,22 @@ class ClubApplicationGrantFactory(DjangoModelFactory[ClubApplicationGrant]):
 
     club = SubFactory(ClubFactory)  # type: ignore[no-untyped-call]
     application = SubFactory(PartnerApplicationFactory)  # type: ignore[no-untyped-call]
+
+
+def approve(application: PartnerApplication) -> PartnerApplication:
+    """Approve a saved application, for tests only.
+
+    It stands in for the approval service (#29), which does not exist yet.
+    It writes ``approved_at`` and ``approved_by`` through ``update_fields``,
+    the only write path the model allows. It records no Audit Event.
+    """
+    application.approved_at = timezone.now()
+    application.approved_by = UserFactory.create()
+    application.save(update_fields=list(APPROVAL_FIELDS))
+    return application
+
+
+def approved_application(**kwargs: Any) -> PartnerApplication:
+    """A new application, approved with ``approve``."""
+    application: PartnerApplication = PartnerApplicationFactory.create(**kwargs)
+    return approve(application)

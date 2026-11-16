@@ -8,6 +8,7 @@ from apps.clubs.tests.factories import (
     ClubRoleFactory,
     OrganizerFactory,
     OrganizerMemberFactory,
+    verified_organizer,
 )
 
 pytestmark = pytest.mark.django_db
@@ -53,3 +54,12 @@ def test_batches_get_distinct_accounts() -> None:
 
     assert len({member.account_id for member in members}) == 5
     assert len({role.account_id for role in roles}) == 5
+
+
+def test_verified_organizer_is_stored_verified() -> None:
+    organizer = verified_organizer()
+
+    stored = Organizer.objects.get(pk=organizer.pk)
+    assert stored.is_verified
+    assert stored.verified_by_id is not None
+    assert not stored.members.filter(account_id=stored.verified_by_id).exists()
