@@ -161,12 +161,17 @@ def _both_teams_confirmed(match: Match) -> bool:
 
 def _record_decision(
     match: Match, player: Player, decision: ConfirmationDecision
-) -> None:
-    """Add the player's decision, unless they already gave it."""
-    if not MatchConfirmation.objects.filter(
+) -> bool:
+    """Add the player's decision, unless they already gave it.
+
+    Returns True when it added the row, False when it was already there.
+    """
+    if MatchConfirmation.objects.filter(
         match=match, player=player, decision=decision
     ).exists():
-        MatchConfirmation.objects.create(match=match, player=player, decision=decision)
+        return False
+    MatchConfirmation.objects.create(match=match, player=player, decision=decision)
+    return True
 
 
 def _confirm(locked: Match, actor: Actor) -> None:
@@ -221,8 +226,10 @@ def dispute_match(match: Match, *, actor: Actor, reason: str = "") -> Match:
     A pending or confirmed match becomes disputed, with one
     ``match.dispute`` Audit Event, and a match that was counting sends
     ``match_changed`` with ``change=dispute``. A disputed match only gains
-    the participant's dispute row. A voided match raises
-    ``MatchStateError``. Only a participant may dispute.
+    the participant's dispute row. A participant disputes a match at most
+    once: a repeat (also after a moderator resolved the dispute as
+    confirmed) does nothing. A voided match raises ``MatchStateError``.
+    Only a participant may dispute.
     """
     _saved(match)
     player = participant_player(actor, match)
@@ -232,8 +239,10 @@ def dispute_match(match: Match, *, actor: Actor, reason: str = "") -> Match:
         locked = _lock(match)
         if locked.status == MatchStatus.VOIDED:
             raise MatchStateError
-        _record_decision(locked, player, ConfirmationDecision.DISPUTE)
-        if locked.status == MatchStatus.DISPUTED:
+        # A participant disputes a match once. A repeat, even after a
+        # moderator resolved the dispute as confirmed, changes nothing.
+        added = _record_decision(locked, player, ConfirmationDecision.DISPUTE)
+        if not added or locked.status == MatchStatus.DISPUTED:
             return locked
         was_counting = locked.is_counted()
         before = _set_status(locked, MatchStatus.DISPUTED)
