@@ -60,3 +60,4 @@ Add each record here when it merges.
 - [0010. Partner applications: a swapped OAuth Application model](0010-partner-application-model.md) (issue #22)
 - [0011. Duplicate match detection](0011-duplicate-match-detection.md) (issue #25)
 - [0012. Match submission permissions](0012-match-submission-permissions.md) (issue #79)
+- [0013. Match confirmation and changes](0013-match-confirmation-and-changes.md) (issue #26)

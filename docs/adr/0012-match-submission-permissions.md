@@ -32,6 +32,6 @@ Once #26 lands, a match that a permitted Organizer, Club, or application submits
 ## Alternatives considered
 
 - Event authority alone for a match with an Event and a Club. Rejected: the issue's acceptance criteria require a role or grant for any match with a Club, and a Club should decide who files matches under its name.
-- Letting an approved application submit rec play with no Event or Club. Rejected: decision F1 keeps those for player self-submission, which stays pending until both teams confirm, while an application's match will be confirmed on creation (#26).
+- Letting an approved application submit rec play with no Event or Club. Rejected: decision F1 keeps those for player self-submission, which stays pending until both teams confirm (or, since ADR 0013, until a permitted submitter sends the same match), while an application's match will be confirmed on creation (#26).
 - Checking permission in each submission path. Rejected: paths would drift, and a path that checked after the duplicate lookup would leak whether a match exists.
 - A 403 that names the failed rule. Rejected: it would tell any caller whether an Organizer is verified or a Club has granted an application.
