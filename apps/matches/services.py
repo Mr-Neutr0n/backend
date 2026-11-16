@@ -30,6 +30,8 @@ No rule reads payment status or any paid entitlement: the function takes
 no such input (CLAUDE.md, hard rule 7).
 """
 
+import hashlib
+import json
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -408,4 +410,73 @@ def validate_match(
         best_of=chosen_best_of,
         game_target=target,
         scoring_type=scoring,
+    )
+
+
+# Duplicate detection.
+
+_FINGERPRINT_VERSION = 1
+
+
+def _canonical_teams(
+    team_a: Sequence[int], team_b: Sequence[int]
+) -> tuple[tuple[int, ...], tuple[int, ...], bool]:
+    """Each team sorted, the lower team first, and whether they were swapped."""
+    first, second = tuple(sorted(team_a)), tuple(sorted(team_b))
+    if first > second:
+        return second, first, True
+    return first, second, False
+
+
+def _digest(payload: dict[str, object]) -> bytes:
+    text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(text.encode()).digest()
+
+
+def match_fingerprint(
+    team_a: Sequence[int],
+    team_b: Sequence[int],
+    played_on: date,
+    games: Sequence[Sequence[int]],
+) -> str:
+    """A SHA-256 hex digest of the teams, the date played, and the scores.
+
+    Players are Player primary keys. Neither the team order (with each
+    game's scores swapped to match) nor the player order within a team
+    changes it. Any other change to the players, date, or scores does.
+    """
+    first, second, swapped = _canonical_teams(team_a, team_b)
+    scores = [[b, a] if swapped else [a, b] for a, b in games]
+    payload: dict[str, object] = {
+        "v": _FINGERPRINT_VERSION,
+        "teams": [list(first), list(second)],
+        "played_on": played_on.isoformat(),
+        "games": scores,
+    }
+    return _digest(payload).hex()
+
+
+def _lock_key(payload: dict[str, object]) -> int:
+    """A signed 64-bit advisory lock key for a payload."""
+    return int.from_bytes(_digest(payload)[:8], "big", signed=True)
+
+
+def _lineup_lock_key(
+    team_a: Sequence[int], team_b: Sequence[int], played_on: date
+) -> int:
+    """One lock for every exact and near duplicate of a lineup on a date."""
+    first, second, _swapped = _canonical_teams(team_a, team_b)
+    return _lock_key(
+        {
+            "lock": "lineup",
+            "teams": [list(first), list(second)],
+            "played_on": played_on.isoformat(),
+        }
+    )
+
+
+def _external_id_lock_key(application_id: int, external_id: str) -> int:
+    """One lock for an application's external id."""
+    return _lock_key(
+        {"lock": "external_id", "application": application_id, "id": external_id}
     )
