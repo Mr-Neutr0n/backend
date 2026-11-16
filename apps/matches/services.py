@@ -873,19 +873,34 @@ def draft_match(
     )
 
 
-def lock_draft(draft: MatchDraft) -> None:
-    """Take the draft's advisory locks: its external id's, then its lineup's.
+def stored_lineup_lock_key(match: Match) -> int:
+    """The lineup lock key of a saved match, from its stored players and date."""
+    played_on = Match.objects.filter(pk=match.pk).values_list("played_on", flat=True)
+    teams: dict[str, list[int]] = {Team.A: [], Team.B: []}
+    for player_id, team in MatchParticipant.objects.filter(
+        match_id=match.pk
+    ).values_list("player_id", "team"):
+        teams.setdefault(team, []).append(player_id)
+    return _lineup_lock_key(teams[Team.A], teams[Team.B], played_on.get())
 
-    Call inside a transaction. The locks last until the outermost
-    transaction ends. Take them before any row lock, as every creation
-    path does, so a row lock never waits behind an advisory lock in one
-    path and the other way round in another.
+
+def lock_draft(draft: MatchDraft, *, also: Sequence[int] = ()) -> None:
+    """Take the draft's advisory locks: its external id's, then the lineups'.
+
+    The lineup locks are the draft's and any in ``also`` (an edit passes
+    the old match's), without repeats and in key order. Call inside a
+    transaction. The locks last until the outermost transaction ends.
+    Take them before any row lock, as every path does, so a row lock never
+    waits behind an advisory lock in one path and the other way round in
+    another.
     """
     match = draft.match
     application = match.submitted_by_application
     if match.external_id and application is not None:
         _advisory_lock(_external_id_lock_key(application.pk, match.external_id))
-    _advisory_lock(_lineup_lock_key(draft.keys_a, draft.keys_b, match.played_on))
+    lineup = _lineup_lock_key(draft.keys_a, draft.keys_b, match.played_on)
+    for key in sorted({lineup, *also}):
+        _advisory_lock(key)
 
 
 def check_external_id(draft: MatchDraft, *, replaces: Match | None = None) -> None:
@@ -1129,11 +1144,18 @@ def record_match(
         lock_draft(draft)
         check_external_id(draft)
         existing = exact_duplicate(draft)
-        if existing is not None:
-            if confirms and submitter is not None:
+        if existing is not None and confirms and submitter is not None:
+            # The match may change while this call waits for its row lock
+            # (a void, a confirmation). The lineup lock stops any new
+            # duplicate from appearing, so one more look is enough.
+            for _attempt in range(2):
                 confirmed = _confirm_pending_duplicate(existing, submitter)
                 if confirmed is not None:
                     return RecordedMatch(match=confirmed, created=False)
+                existing = exact_duplicate(draft)
+                if existing is None:
+                    break
+        if existing is not None:
             raise duplicate_error(existing, submitter)
 
         status = MatchStatus.CONFIRMED if confirms else MatchStatus.PENDING

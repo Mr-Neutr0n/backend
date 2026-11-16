@@ -76,6 +76,7 @@ from apps.matches.services import (
     exact_duplicate,
     insert_draft,
     lock_draft,
+    stored_lineup_lock_key,
 )
 from apps.matches.signals import MatchChange, match_changed, match_confirmed
 from apps.players.models import Player
@@ -428,7 +429,7 @@ def edit_match(
         sequence=sequence,
     )
     with transaction.atomic():
-        lock_draft(draft)
+        lock_draft(draft, also=[stored_lineup_lock_key(stored)])
         locked = _lock(match)
         if locked.status == MatchStatus.VOIDED:
             raise MatchStateError
