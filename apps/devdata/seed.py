@@ -197,7 +197,9 @@ def seed(*, players: int) -> SeedSummary:
     matches = MATCHES_PER_PLAYER * players
     for index in range(matches):
         source = sources[index % len(sources)]
-        match_format = formats[index % len(formats)]
+        # Advance the format once per pass over the sources, so each
+        # source gets both formats (index % 4 would fix index % 2).
+        match_format = formats[(index // len(sources)) % len(formats)]
         team_a, team_b, played_on = _draw(
             rng, pool, match_format, source.first_day, source.last_day, used
         )
