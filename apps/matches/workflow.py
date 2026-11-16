@@ -40,10 +40,12 @@ orders. The other services take only the row lock.
 
 import logging
 from collections.abc import Iterable, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from apps.audit.models import AuditAction
 from apps.audit.services import record_event, snapshot
@@ -452,3 +454,39 @@ def edit_match(
             match_confirmed.send(sender=Match, match=corrected)
         _send_count_changes(counting)
         return corrected
+
+
+def expire_unconfirmed_matches(now: datetime | None = None) -> int:
+    """Void pending matches older than ``MATCH_CONFIRMATION_EXPIRY_DAYS``.
+
+    Does nothing and returns 0 when the setting is None (the default).
+    Each match is voided in its own transaction, with one ``match.expire``
+    Audit Event and no actor, and sends ``release`` for each match it no
+    longer holds. A match another transaction holds locked is skipped
+    until the next run, and a match no longer pending is left alone, so
+    running twice is safe. Returns how many matches were voided.
+    """
+    days: int | None = settings.MATCH_CONFIRMATION_EXPIRY_DAYS
+    if days is None:
+        return 0
+    cutoff = (now or timezone.now()) - timedelta(days=days)
+    candidates = list(
+        Match.objects.filter(status=MatchStatus.PENDING, created_at__lt=cutoff)
+        .order_by("pk")
+        .values_list("pk", flat=True)
+    )
+    expired = 0
+    for pk in candidates:
+        with transaction.atomic():
+            locked = (
+                Match.objects.select_for_update(skip_locked=True)
+                .filter(pk=pk, status=MatchStatus.PENDING, created_at__lt=cutoff)
+                .first()
+            )
+            if locked is None:
+                continue
+            _void(locked, action=AuditAction.MATCH_EXPIRE, actor=None, reason="")
+            expired += 1
+    if expired:
+        logger.info("Expired %d unconfirmed matches.", expired)
+    return expired

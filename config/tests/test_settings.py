@@ -26,6 +26,7 @@ SETTINGS_VARS = (
     "REDIS_URL",
     "CSRF_TRUSTED_ORIGINS",
     "CORS_ALLOWED_ORIGINS",
+    "MATCH_CONFIRMATION_EXPIRY_DAYS",
 )
 
 # Made-up values for tests only. Not a real secret.
