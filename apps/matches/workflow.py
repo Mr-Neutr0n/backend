@@ -61,8 +61,10 @@ from apps.matches.models import (
 from apps.matches.permissions import (
     Actor,
     MatchActionDenied,
+    MatchSubmission,
     can_change_match,
     can_confirm_as_organizer,
+    can_create_match,
     is_moderator,
     participant_player,
 )
@@ -367,7 +369,9 @@ def edit_match(
 ) -> Match:
     """Void ``match`` and create its correction. Returns the new match.
 
-    For a moderator or an actor ``can_change_match`` allows; only a
+    For a moderator, or an actor ``can_change_match`` allows that may also
+    submit the correction (``can_create_match`` for the old match's Event
+    and Club and the new players), checked before any validation; only a
     moderator edits a disputed match, and a voided one raises
     ``MatchStateError``. The correction keeps the old match's submitter,
     external id, Event, and Club, links to it through ``corrects``, and is
@@ -388,6 +392,20 @@ def edit_match(
     stored = Match.objects.select_related(
         "submitted_by_user", "submitted_by_application", "event", "club"
     ).get(pk=match.pk)
+    if not moderator:
+        # An edit creates a match, so the editor also needs the authority
+        # to submit it, checked before any validation.
+        submission = MatchSubmission(
+            event=stored.event,
+            club=stored.club,
+            player_ids=frozenset(
+                player.pk
+                for player in (*team_a, *team_b)
+                if isinstance(player, Player) and player.pk is not None
+            ),
+        )
+        if not can_create_match(actor, submission):
+            raise MatchActionDenied
     draft = draft_match(
         format=format,
         team_a=team_a,
