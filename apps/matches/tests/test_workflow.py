@@ -31,7 +31,7 @@ from apps.matches.models import (
     MatchStatus,
     Team,
 )
-from apps.matches.permissions import MatchActionDenied
+from apps.matches.permissions import MatchActionDenied, is_moderator
 from apps.matches.services import (
     DuplicateMatchError,
     MatchValidationError,
@@ -213,12 +213,12 @@ def test_a_club_admin_cannot_confirm(signals: SignalLog) -> None:
 def test_disputing_a_pending_match(
     pending: Match, players: list[Player], signals: SignalLog
 ) -> None:
-    dispute_match(pending, actor=players[2].account, reason=REASON)
+    dispute_match(pending, actor=players[2].account)
 
     assert _status(pending) == MatchStatus.DISPUTED
     [audit] = _audits(pending)
     assert audit.action == AuditAction.MATCH_DISPUTE
-    assert audit.reason == REASON
+    assert audit.reason == ""
     assert audit.after == {"status": MatchStatus.DISPUTED}
     assert signals.changed == []
 
@@ -424,7 +424,8 @@ def _edit(match: Match, actor: Any, **overrides: Any) -> Match:
         "team_b": teams[Team.B],
         "games": OTHER_GAMES,
         "played_on": stored.played_on,
-        "reason": REASON,
+        # Only a moderator may give a reason (review finding L).
+        "reason": REASON if is_moderator(actor) else "",
     }
     values.update(overrides)
     return edit_match(match, actor=actor, **values)
