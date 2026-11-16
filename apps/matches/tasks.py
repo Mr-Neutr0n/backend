@@ -24,6 +24,7 @@ def expire_unconfirmed_matches() -> int:
     Beat runs it daily. Takes no arguments and returns only the count, so
     no personal data passes through the broker or the worker log. Safe to
     run twice: a match already voided, or locked by another run, is
-    skipped.
+    skipped. A match that fails is logged by id and skipped, and the task
+    then fails with ``ExpiryFailed`` so the failure is visible.
     """
     return workflow.expire_unconfirmed_matches()

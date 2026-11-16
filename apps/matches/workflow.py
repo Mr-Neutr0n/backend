@@ -102,6 +102,17 @@ class MatchStateError(ValueError):
         super().__init__(self.message)
 
 
+class ExpiryFailed(RuntimeError):
+    """Some matches could not be expired. ``failed`` is how many.
+
+    The message gives only the count.
+    """
+
+    def __init__(self, failed: int) -> None:
+        self.failed = failed
+        super().__init__(f"{failed} unconfirmed matches could not be expired.")
+
+
 def _lock_row(match: Match) -> Match:
     """The match's row, locked until the transaction ends."""
     return Match.objects.select_for_update().get(pk=match.pk)
@@ -506,7 +517,9 @@ def expire_unconfirmed_matches(now: datetime | None = None) -> int:
     Audit Event and no actor, and sends ``release`` for each match it no
     longer holds. A match another transaction holds locked is skipped
     until the next run, and a match no longer pending is left alone, so
-    running twice is safe. Returns how many matches were voided.
+    running twice is safe. Returns how many matches were voided. A match
+    that fails rolls back alone and is logged by id; the run goes on, then
+    raises ``ExpiryFailed`` with how many failed.
     """
     days: int | None = settings.MATCH_CONFIRMATION_EXPIRY_DAYS
     if days is None:
@@ -518,21 +531,36 @@ def expire_unconfirmed_matches(now: datetime | None = None) -> int:
         .values_list("pk", flat=True)
     )
     expired = 0
+    failed = 0
     for pk in candidates:
-        with transaction.atomic():
-            # Never wait: a match whose lineup another transaction holds is
-            # left for the next run.
-            if not try_advisory_lock(stored_lineup_lock_key(Match(pk=pk))):
-                continue
-            locked = (
-                Match.objects.select_for_update(skip_locked=True)
-                .filter(pk=pk, status=MatchStatus.PENDING, created_at__lt=cutoff)
-                .first()
-            )
-            if locked is None:
-                continue
-            _void(locked, action=AuditAction.MATCH_EXPIRE, actor=None, reason="")
-            expired += 1
+        try:
+            if _expire_one(pk, cutoff):
+                expired += 1
+        except Exception:
+            # Its transaction has rolled back. Log the id only: the error's
+            # text could hold anything. The other matches still expire.
+            failed += 1
+            logger.error("Could not expire match %s.", pk)
     if expired:
         logger.info("Expired %d unconfirmed matches.", expired)
+    if failed:
+        raise ExpiryFailed(failed)
     return expired
+
+
+def _expire_one(pk: int, cutoff: datetime) -> bool:
+    """Void one pending match in its own transaction. True if it was voided."""
+    with transaction.atomic():
+        # Never wait: a match whose lineup another transaction holds is
+        # left for the next run.
+        if not try_advisory_lock(stored_lineup_lock_key(Match(pk=pk))):
+            return False
+        locked = (
+            Match.objects.select_for_update(skip_locked=True)
+            .filter(pk=pk, status=MatchStatus.PENDING, created_at__lt=cutoff)
+            .first()
+        )
+        if locked is None:
+            return False
+        _void(locked, action=AuditAction.MATCH_EXPIRE, actor=None, reason="")
+        return True
