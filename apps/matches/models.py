@@ -16,10 +16,12 @@ guard.
 These models enforce only what a database constraint can: the allowed
 values of each choice, one submitter, a ``played_at`` that agrees with its
 local date, external IDs unique per Partner Application, at most
-``MAX_GAMES`` games, and no negative scores. Score validation (win by 2,
-team size per format, games that decide the match) is
-``apps.matches.services.validate_match``, duplicate detection is #25, and
-confirmation and status changes are #26.
+``MAX_GAMES`` games, no negative scores, and one counted Match per
+fingerprint. Score validation (win by 2, team size per format, games that
+decide the match) is ``apps.matches.services.validate_match``, duplicate
+detection is ``apps.matches.services.record_match``, and confirmation and
+status changes are #26. A possible duplicate is held for review as a
+``MatchFlag``, so reviewing it (#40) writes a flag row, never the Match.
 
 ``ScoringType`` values equal ``open_engine.ScoringType``'s and
 ``GameTarget`` values equal the points in the engine's ``ALL_GAME_FORMATS``,
@@ -327,6 +329,16 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
     )
     event_label = models.CharField(max_length=200, blank=True, default="")
     bracket_label = models.CharField(max_length=200, blank=True, default="")
+    fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        editable=False,
+        help_text=(
+            "SHA-256 hex digest of the teams, date played, and game scores, "
+            "set by record_match()"
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -395,6 +407,12 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
                 condition=~Q(external_id=""),
                 name="matches_match_external_id_unique_per_application",
                 violation_error_message=_EXTERNAL_ID_TAKEN,
+            ),
+            models.UniqueConstraint(
+                fields=("fingerprint",),
+                condition=~Q(fingerprint="") & ~Q(status=MatchStatus.VOIDED),
+                name="matches_match_fingerprint_unique_while_counted",
+                violation_error_message="This match was already submitted.",
             ),
         ]
 
@@ -503,3 +521,78 @@ class Game(_LinkMessagesModel):
 
     def __str__(self) -> str:
         return f"{self.match.public_code} game {self.game_number}"
+
+
+class FlagReason(models.TextChoices):
+    """Why a Match was flagged for review."""
+
+    POSSIBLE_DUPLICATE = "possible_duplicate", "Possible duplicate"
+
+
+class MatchFlag(_LinkMessagesModel):
+    """A reason to hold a Match for Organizer review (CONTEXT.md, Flagged Match).
+
+    ``record_match()`` creates a ``possible_duplicate`` flag for each
+    earlier counted Match with the same teams and date but other scores,
+    with ``duplicate_of`` set to it. A flag is a row of its own, so
+    reviewing one never edits the Match in the ledger.
+
+    #26 and #44 must not count a Match that has an open flag. #40 adds the
+    review actions and any resolution fields.
+    """
+
+    match = models.ForeignKey(
+        Match,
+        on_delete=models.PROTECT,
+        related_name="flags",
+        error_messages=_MATCH_MESSAGES,
+    )
+    reason = models.CharField(
+        max_length=30, choices=FlagReason, error_messages=CHOICE_MESSAGES
+    )
+    duplicate_of = models.ForeignKey(
+        Match,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="duplicate_flags",
+        error_messages=_MATCH_MESSAGES,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=Q(reason__in=FlagReason.values),
+                name="matches_matchflag_reason_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(
+                    reason=FlagReason.POSSIBLE_DUPLICATE, duplicate_of__isnull=False
+                )
+                | (
+                    ~Q(reason=FlagReason.POSSIBLE_DUPLICATE)
+                    & Q(duplicate_of__isnull=True)
+                ),
+                name="matches_matchflag_duplicate_of_matches_reason",
+                violation_error_message=(
+                    "A possible duplicate flag names the match it may duplicate."
+                ),
+            ),
+            models.CheckConstraint(
+                condition=~Q(duplicate_of=F("match")),
+                name="matches_matchflag_not_self",
+                violation_error_message="A match cannot duplicate itself.",
+            ),
+            models.UniqueConstraint(
+                fields=("match", "duplicate_of"),
+                name="matches_matchflag_once_per_pair",
+                violation_error_message=(
+                    "This match is already flagged as a duplicate of that match."
+                ),
+            ),
+        ]
+
+    def __str__(self) -> str:
+        # The match code and reason, never a name.
+        return f"{self.match.public_code} flag {self.reason}"
