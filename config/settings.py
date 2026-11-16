@@ -293,6 +293,8 @@ INSTALLED_APPS = [
     # Application admin that oauth2_provider registers.
     "apps.partners",
     "apps.matches",
+    # Development only: the seed_dev_data command. No models.
+    "apps.devdata",
 ]
 
 # The OPEN Account login model, keyed on email (apps/accounts).
