@@ -530,18 +530,21 @@ class FlagReason(models.TextChoices):
 
 
 class MatchFlag(_LinkMessagesModel):
-    """A reason to hold a Match for Organizer review (CONTEXT.md, Flagged Match).
+    """A reason to hold a Match for moderator review (#40).
 
-    ``record_match()`` creates a ``possible_duplicate`` flag for each
-    earlier Match that is not voided, with the same teams and date but
-    other scores, with ``duplicate_of`` set to it. A flag is a row of its
-    own, so reviewing one never edits the Match in the ledger.
+    See CONTEXT.md, Flagged Match. ``record_match()`` creates a
+    ``possible_duplicate`` flag for each earlier Match that is not voided,
+    with the same teams and date but other scores, with ``duplicate_of``
+    set to it. A flag is a row of its own, so reviewing one never edits the
+    Match in the ledger.
 
     An open ``possible_duplicate`` flag holds both its ``match`` and its
-    ``duplicate_of`` from counting until a moderator resolves it (#40):
-    #26 and #44 must not count either. #40 adds the review actions and any
-    resolution fields. For #26: a permitted submitter's exact duplicate of
-    a pending Match should confirm that Match, not be refused.
+    ``duplicate_of`` from counting until a moderator resolves it (#40),
+    whatever the new Match's status or submitter. #26 and #44 must count
+    neither, unless they refine the hold (ADR 0011). #40 adds the review
+    actions and any resolution fields. For #26: a permitted submitter's
+    exact duplicate of a pending Match should confirm that Match, not be
+    refused.
     """
 
     match = models.ForeignKey(
