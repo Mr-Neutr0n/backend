@@ -46,7 +46,7 @@ def test_two_counted_matches_cannot_share_a_fingerprint() -> None:
     with pytest.raises(IntegrityError) as error, transaction.atomic():
         _set_fingerprint(second, FINGERPRINT)
 
-    assert "matches_match_fingerprint_unique_while_counted" in str(error.value)
+    assert "matches_match_fingerprint_unique_unless_voided" in str(error.value)
 
 
 def test_a_voided_match_may_share_a_fingerprint() -> None:
