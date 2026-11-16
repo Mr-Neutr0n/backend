@@ -71,7 +71,7 @@ _Avoid_: OPEN ID, player ID, row id.
 ## Matches and results
 
 **Match**:
-One completed contest between two teams, with one or more game scores. Singles teams have one player; doubles teams have two. The engine needs a `match_id` unique to its source, used for duplicate protection; #44 decides which backend field supplies it. A Partner Application's own identifier for a Match is the Match's `external_id`, unique per application; a Match an Account submitted has none. Engine: `Match`. Backend: `matches.Match`, with its players in `matches.MatchParticipant`.
+One completed contest between two teams, with one or more game scores. Singles teams have one player; doubles teams have two. The engine needs a `match_id` unique to its source, used for duplicate protection; #44 decides which backend field supplies it. A Partner Application's own identifier for a Match is the Match's `external_id`, unique per application among Matches that are not voided (a Correction keeps it); a Match an Account submitted has none. Engine: `Match`. Backend: `matches.Match`, with its players in `matches.MatchParticipant`.
 _Avoid_: game (a game is one scored unit inside a Match), result.
 
 **Game**:
@@ -84,14 +84,21 @@ How each game is scored: side-out or rally scoring, points to win, win-by margin
 Where the result came from, which affects its weight: `tournament`, `league`, `rec_verified`, or `self_reported`. Engine: `MatchType`.
 
 **Confirmation**:
-Agreement that a reported score is correct. A self-reported Match needs at least one player from each team to confirm it. Engine: `Match.confirmed_by`.
+Agreement that a reported score is correct. A self-reported Match stays pending until at least one player from each team confirms it, or an Organizer, Club, or Partner Application with permission submits the same Match (same teams, date, and scores). A Match that an Organizer, Club, or Partner Application with permission submits is confirmed when it is created (decision F4). Only a confirmed Match can count. Engine: `Match.confirmed_by`. Backend: `matches.MatchConfirmation`, one row per player's decision, and `Match.status` (ADR 0013).
+
+**Dispute**:
+A participant's statement that a Match's score is wrong. A disputed Match stops counting until a moderator resolves it as confirmed or voided. Each player disputes a Match at most once. Backend: `matches.MatchConfirmation` with decision `dispute`.
+
+**Correction**:
+The new Match that replaces a wrong one. The wrong Match is voided, never edited, and the Correction points to it (`Match.corrects`), so the Ledger keeps both. A void with no replacement removes a Match from counting the same way.
+_Avoid_: delete. The backend calls making a Correction an edit (`edit_match`, `match.edit`); it never changes the stored Match.
 
 **Submission**:
 A request to add a Match through the Results API. A Submission becomes a Match in the Ledger only after it passes the submitter's permission check, validation, duplicate checks, and Confirmation.
 _Avoid_: upload (an upload is a batch of Submissions).
 
 **Flagged Match**:
-A Match held for review because it looks like an outlier, a possible duplicate, or otherwise suspicious. A possible duplicate flag holds both Matches from counting, the flagged one and the earlier one it may repeat, until moderator review resolves the flag. Backend: `matches.MatchFlag`, one row per flag, so review never edits the Match.
+A Match held for review because it looks like an outlier, a possible duplicate, or otherwise suspicious. A possible duplicate flag holds both Matches from counting, the flagged one and the earlier one it may repeat, until moderator review resolves the flag or one of the two is voided. Backend: `matches.MatchFlag`, one row per flag, so review never edits the Match.
 
 **Ledger**:
 The append-only, ordered record of every counted Match. Order is date, time, sequence, then `match_id`. The Ledger is the source of truth for ratings. Engine: `ledger_order`. Backend: `played_on`, `played_at` with `played_at_utc_offset`, and `sequence` on `matches.Match`.
@@ -142,7 +149,7 @@ Running the engine on real results without publishing or relying on its Ratings.
 ## Records
 
 **Audit Event**:
-One recorded sensitive action: who did it (an Account, a Partner Application, both, or nobody), what it changed (the target), the values before and after (for an identifying personal data field, only its name, ADR 0009), and a reason. Audit Events are append-only. They record moderation, manual edits, account security changes, privacy changes, a player's own profile changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
+One recorded sensitive action: who did it (an Account, a Partner Application, both, or nobody), what it changed (the target), the values before and after (for an identifying personal data field, only its name, ADR 0009), and a reason. Audit Events are append-only. They record moderation, manual edits, every Match status change (confirmation, dispute, void, expiry, and correction), account security changes, privacy changes, a player's own profile changes, and partner application requests and decisions; they are not part of the Ledger and never feed ratings. Backend: `audit.AuditEvent`.
 _Avoid_: log entry (Django's admin `LogEntry` is a different thing), history.
 
 ## Governance terms

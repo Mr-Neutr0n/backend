@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 import django_stubs_ext
 import environ
+from celery.schedules import crontab
 from django.core.exceptions import ImproperlyConfigured
 from kombu import Queue
 
@@ -58,6 +59,28 @@ def _required(name: str) -> str:
 def _list(name: str) -> list[str]:
     """Split a comma-separated variable, stripping entries, dropping blanks."""
     return [item.strip() for item in _raw(name).split(",") if item.strip()]
+
+
+_MAX_DAYS = 36500
+
+
+def _positive_days(name: str) -> int | None:
+    """A whole number of days from 1 to 36500, or None when unset or empty.
+
+    Only ASCII digits are accepted, at most 5 of them, checked before the
+    conversion, so a huge value never reaches ``int()`` or a date
+    calculation. The error names the variable and the range and never
+    echoes the value.
+    """
+    value = _raw(name).strip()
+    if not value:
+        return None
+    if not re.fullmatch(r"[0-9]{1,5}", value) or not 1 <= int(value) <= _MAX_DAYS:
+        raise ImproperlyConfigured(
+            f"Set {name} to a whole number of days from 1 to {_MAX_DAYS}, or "
+            "leave it empty (see .env.example)."
+        )
+    return int(value)
 
 
 def _database(url: str) -> dict[str, object]:
@@ -442,6 +465,25 @@ CELERY_RESULT_EXPIRES = None
 # Periodic tasks live in the database (django_celery_beat). Run one beat
 # process only, or every periodic task is sent twice.
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+# The scheduler copies these entries into the database at each beat start,
+# which reverts an admin edit of the same row. Edit them here.
+CELERY_BEAT_SCHEDULE = {
+    # Voids pending matches older than MATCH_CONFIRMATION_EXPIRY_DAYS (#26).
+    # Does nothing while that is unset. A run missed for more than an hour
+    # is dropped, not queued behind the next one.
+    "expire-unconfirmed-matches": {
+        "task": "apps.matches.tasks.expire_unconfirmed_matches",
+        "schedule": crontab(hour=3, minute=0),
+        "options": {"expire_seconds": 3600},
+    },
+}
+
+
+# Matches
+
+# Days a pending (unconfirmed) match waits before the daily task voids it
+# (#26). Unset or empty means pending matches never expire.
+MATCH_CONFIRMATION_EXPIRY_DAYS = _positive_days("MATCH_CONFIRMATION_EXPIRY_DAYS")
 
 
 # Password validation

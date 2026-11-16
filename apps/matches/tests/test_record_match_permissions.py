@@ -81,7 +81,7 @@ def _record(
     else:
         values["submitted_by_application"] = submitter
     values.update(overrides)
-    return record_match(**values)
+    return record_match(**values).match
 
 
 def _counts() -> tuple[int, int, int, int]:

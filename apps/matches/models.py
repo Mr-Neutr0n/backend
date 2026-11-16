@@ -3,15 +3,16 @@
 A Match is one entry in the match ledger (CONTEXT.md, Match and Ledger).
 The ledger is append-only (CLAUDE.md, hard rule 3): a counted match is
 never edited in place or deleted. A correction is a new record that
-references the old one. #26 adds the service that makes those changes, with
-its Audit Events. Until then nothing in the backend changes a Match after
-it is created.
+references the old one. The workflow services in ``apps.matches.workflow``
+make every change, with their Audit Events.
 
-Games and participants use ``PROTECT``, so the ORM refuses to delete a Match
-that has either. That is not a full guard: a Match with neither can still be
-deleted, ``QuerySet.update`` and raw SQL can still change rows, and nothing
-yet stops an edit through ``save()``. #26 owes the full delete and edit
-guard.
+The ORM guards the ledger (``MatchImmutable``): no Match, Match
+Participant, Game, or Match Confirmation can be deleted; an existing Match
+can be saved only with ``update_fields=["status"]``; the other three are
+inserted once and never saved again; and ``QuerySet.update``, ``delete``,
+``bulk_update``, and an upsert through ``bulk_create`` raise on all four,
+through the default and the base manager. Raw SQL and raw saves
+(``loaddata``) are not guarded.
 
 These models enforce only what a database constraint can: the allowed
 values of each choice, one submitter, a ``played_at`` that agrees with its
@@ -20,7 +21,8 @@ local date, external IDs unique per Partner Application, at most
 fingerprint. Score validation (win by 2, team size per format, games that
 decide the match) is ``apps.matches.services.validate_match``, duplicate
 detection is ``apps.matches.services.record_match``, and confirmation and
-status changes are #26. A possible duplicate is held for review as a
+status changes are ``apps.matches.workflow``. Which matches count is
+``MatchQuerySet.counted``. A possible duplicate is held for review as a
 ``MatchFlag``, so reviewing it (#40) writes a flag row, never the Match.
 
 ``ScoringType`` values equal ``open_engine.ScoringType``'s and
@@ -34,9 +36,9 @@ Event's kind, or is self-reported when there is no Event (decision F1 in
 """
 
 import datetime
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from datetime import UTC, timedelta
-from typing import ClassVar
+from typing import Any, ClassVar, NoReturn
 
 from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist, ValidationError
@@ -46,9 +48,11 @@ from django.db.models import (
     DateField,
     DateTimeField,
     DurationField,
+    Exists,
     ExpressionWrapper,
     F,
     Func,
+    OuterRef,
     Q,
     Value,
 )
@@ -173,6 +177,130 @@ def _foreign_key(
     return field if isinstance(field, models.ForeignKey) else None
 
 
+class MatchImmutable(RuntimeError):
+    """Raised when code tries to change or delete a ledger row.
+
+    The message is fixed text.
+    """
+
+    message: ClassVar[str] = (
+        "The match ledger is append-only: a match, its players, its games, and "
+        "its confirmations cannot be changed or deleted."
+    )
+
+    def __init__(self) -> None:
+        super().__init__(self.message)
+
+
+class LedgerQuerySet[LedgerModelT: models.Model](models.QuerySet[LedgerModelT]):
+    """Refuses bulk changes and deletes of ledger rows before any SQL runs.
+
+    ``bulk_create`` still inserts, but an upsert (``update_conflicts``) is
+    refused, since it would update an existing row.
+    """
+
+    def update(self, **kwargs: Any) -> NoReturn:
+        raise MatchImmutable
+
+    def delete(self) -> NoReturn:
+        raise MatchImmutable
+
+    def bulk_update(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise MatchImmutable
+
+    def bulk_create(
+        self,
+        objs: Iterable[LedgerModelT],
+        batch_size: int | None = None,
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+        update_fields: Collection[str] | None = None,
+        unique_fields: Collection[str] | None = None,
+    ) -> list[LedgerModelT]:
+        if update_conflicts:
+            raise MatchImmutable
+        return super().bulk_create(
+            objs,
+            batch_size=batch_size,
+            ignore_conflicts=ignore_conflicts,
+            update_fields=update_fields,
+            unique_fields=unique_fields,
+        )
+
+
+class _InsertOnlyModel(models.Model):
+    """A ledger row that is inserted once and never saved again or deleted.
+
+    Only a new instance with no primary key may be saved, as a plain
+    insert. Raw writes (``loaddata``, raw SQL) skip this.
+    """
+
+    class Meta:
+        abstract = True
+
+    def save_base(
+        self,
+        raw: bool = False,
+        force_insert: bool | tuple[models.base.ModelBase, ...] = False,
+        force_update: bool = False,
+        using: str | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
+        if (
+            force_update
+            or update_fields is not None
+            or not self._state.adding
+            or self.pk is not None
+        ):
+            raise MatchImmutable
+        super().save_base(
+            raw=raw,
+            force_insert=force_insert,
+            force_update=force_update,
+            using=using,
+            update_fields=update_fields,
+        )
+
+    def delete(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise MatchImmutable
+
+
+class MatchQuerySet(LedgerQuerySet["Match"]):
+    """Matches, with the ledger guard."""
+
+    def counted(self) -> "MatchQuerySet":
+        """The matches that count toward ratings.
+
+        A match counts when it is confirmed and no ``possible_duplicate``
+        flag links it, as ``match`` or as ``duplicate_of``, to a match that
+        is not voided. This is ADR 0011's hold, refined only so that a
+        voided match (expired or corrected) stops holding the other one.
+        #40 adds flag resolution.
+        """
+        flags = MatchFlag.objects.filter(reason=FlagReason.POSSIBLE_DUPLICATE)
+        held_as_match = flags.filter(match=OuterRef("pk")).exclude(
+            duplicate_of__status=MatchStatus.VOIDED
+        )
+        held_as_duplicate = flags.filter(duplicate_of=OuterRef("pk")).exclude(
+            match__status=MatchStatus.VOIDED
+        )
+        return self.filter(status=MatchStatus.CONFIRMED).exclude(
+            Exists(held_as_match) | Exists(held_as_duplicate)
+        )
+
+
+class MatchParticipantQuerySet(LedgerQuerySet["MatchParticipant"]):
+    """Match Participants, with the ledger guard."""
+
+
+class GameQuerySet(LedgerQuerySet["Game"]):
+    """Games, with the ledger guard."""
+
+
+class MatchConfirmationQuerySet(LedgerQuerySet["MatchConfirmation"]):
+    """Match Confirmations, with the ledger guard."""
+
+
 class MatchFormat(models.TextChoices):
     """Singles or doubles.
 
@@ -186,7 +314,11 @@ class MatchFormat(models.TextChoices):
 
 
 class MatchStatus(models.TextChoices):
-    """Where a Match is in confirmation. #26 owns the changes between them."""
+    """Where a Match is in confirmation.
+
+    Only ``record_match`` (the initial status) and the services in
+    ``apps.matches.workflow`` set it.
+    """
 
     PENDING = "pending", "Pending"
     CONFIRMED = "confirmed", "Confirmed"
@@ -339,10 +471,25 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
             "set by record_match()"
         ),
     )
+    corrects = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="corrected_by",
+        error_messages=_MATCH_MESSAGES,
+        help_text="The voided match this match corrects, set only by edit_match()",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = MatchQuerySet.as_manager()
 
     class Meta:
         verbose_name_plural = "matches"
+        # Django's internal queries use the base manager, so it must be the
+        # guarded one too.
+        base_manager_name = "objects"
+        permissions = (("moderate_match", "Can void matches and resolve disputes"),)
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=(
@@ -402,9 +549,12 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
                 ),
                 name="matches_match_external_id_trimmed",
             ),
+            # A corrected match keeps its application's external id, so only
+            # matches that are not voided must differ. record_match() still
+            # refuses an external id used by a match in any status.
             models.UniqueConstraint(
                 fields=("submitted_by_application", "external_id"),
-                condition=~Q(external_id=""),
+                condition=~Q(external_id="") & ~Q(status=MatchStatus.VOIDED),
                 name="matches_match_external_id_unique_per_application",
                 violation_error_message=_EXTERNAL_ID_TAKEN,
             ),
@@ -419,6 +569,33 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
     def __str__(self) -> str:
         # The OPEN Code, never a name, for one rule with Club and Event.
         return self.public_code
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Insert a new Match, or save only the status of an existing one.
+
+        An existing Match may be saved only with ``update_fields`` naming
+        ``status`` alone, which the workflow services in
+        ``apps.matches.workflow`` do under a row lock. Any other save of an
+        existing Match raises ``MatchImmutable``. Raw writes (``loaddata``,
+        raw SQL) skip this.
+        """
+        if not self._state.adding:
+            update_fields = kwargs.get("update_fields")
+            if update_fields is None or set(update_fields) != {"status"}:
+                raise MatchImmutable
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise MatchImmutable
+
+    def is_counted(self) -> bool:
+        """True when this match counts, read from the database.
+
+        See ``MatchQuerySet.counted``. An unsaved match never counts.
+        """
+        if self.pk is None:
+            return False
+        return Match.objects.counted().filter(pk=self.pk).exists()
 
     def clean(self) -> None:
         # Django runs clean() even when a field failed, so a value may still
@@ -457,8 +634,11 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
             raise ValidationError(errors)
 
 
-class MatchParticipant(_LinkMessagesModel):
-    """A Player on one team of a Match. A Player plays once per Match."""
+class MatchParticipant(_LinkMessagesModel, _InsertOnlyModel):
+    """A Player on one team of a Match. A Player plays once per Match.
+
+    Inserted once with its Match and never saved again or deleted.
+    """
 
     match = models.ForeignKey(
         Match,
@@ -474,7 +654,10 @@ class MatchParticipant(_LinkMessagesModel):
     )
     team = models.CharField(max_length=1, choices=Team, error_messages=CHOICE_MESSAGES)
 
+    objects = MatchParticipantQuerySet.as_manager()
+
     class Meta:
+        base_manager_name = "objects"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=Q(team__in=Team.values),
@@ -492,8 +675,11 @@ class MatchParticipant(_LinkMessagesModel):
         return f"{self.match.public_code} team {self.team}"
 
 
-class Game(_LinkMessagesModel):
-    """One game of a Match, numbered from 1. Scores are never negative."""
+class Game(_LinkMessagesModel, _InsertOnlyModel):
+    """One game of a Match, numbered from 1. Scores are never negative.
+
+    Inserted once with its Match and never saved again or deleted.
+    """
 
     match = models.ForeignKey(
         Match,
@@ -505,8 +691,11 @@ class Game(_LinkMessagesModel):
     team_a_score = models.PositiveSmallIntegerField(error_messages=_NUMBER_MESSAGES)
     team_b_score = models.PositiveSmallIntegerField(error_messages=_NUMBER_MESSAGES)
 
+    objects = GameQuerySet.as_manager()
+
     class Meta:
         ordering = ("match", "game_number")
+        base_manager_name = "objects"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=Q(game_number__gte=1, game_number__lte=MAX_GAMES),
@@ -521,6 +710,60 @@ class Game(_LinkMessagesModel):
 
     def __str__(self) -> str:
         return f"{self.match.public_code} game {self.game_number}"
+
+
+class ConfirmationDecision(models.TextChoices):
+    """What a participant said about a Match."""
+
+    CONFIRM = "confirm", "Confirm"
+    DISPUTE = "dispute", "Dispute"
+
+
+class MatchConfirmation(_LinkMessagesModel, _InsertOnlyModel):
+    """One participant's confirmation or dispute of a Match (#26).
+
+    See CONTEXT.md, Confirmation. A Player confirms a Match at most once and
+    disputes it at most once. Only the workflow services in
+    ``apps.matches.workflow`` write these rows. Like the other ledger rows,
+    a row is inserted once and never changed or deleted.
+    """
+
+    match = models.ForeignKey(
+        Match,
+        on_delete=models.PROTECT,
+        related_name="confirmations",
+        error_messages=_MATCH_MESSAGES,
+    )
+    player = models.ForeignKey(
+        "players.Player",
+        on_delete=models.PROTECT,
+        related_name="match_confirmations",
+        error_messages=_PLAYER_MESSAGES,
+    )
+    decision = models.CharField(
+        max_length=10, choices=ConfirmationDecision, error_messages=CHOICE_MESSAGES
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = MatchConfirmationQuerySet.as_manager()
+
+    class Meta:
+        base_manager_name = "objects"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=Q(decision__in=ConfirmationDecision.values),
+                name="matches_matchconfirmation_decision_valid",
+            ),
+            models.UniqueConstraint(
+                fields=("match", "player", "decision"),
+                name="matches_matchconfirmation_once_per_decision",
+                violation_error_message="This player already gave this decision.",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        # The match code and decision, never the Player's name.
+        return f"{self.match.public_code} {self.decision}"
 
 
 class FlagReason(models.TextChoices):
@@ -540,11 +783,11 @@ class MatchFlag(_LinkMessagesModel):
 
     An open ``possible_duplicate`` flag holds both its ``match`` and its
     ``duplicate_of`` from counting until a moderator resolves it (#40),
-    whatever the new Match's status or submitter. #26 and #44 must count
-    neither, unless they refine the hold (ADR 0011). #40 adds the review
-    actions and any resolution fields. For #26: a permitted submitter's
-    exact duplicate of a pending Match should confirm that Match, not be
-    refused.
+    whatever the new Match's status or submitter (ADR 0011). The one
+    refinement (``MatchQuerySet.counted``): a voided match, expired or
+    corrected, no longer holds the other one. #44 must count only
+    ``counted()`` matches. #40 adds the review actions and any resolution
+    fields.
     """
 
     match = models.ForeignKey(

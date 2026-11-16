@@ -7,6 +7,7 @@ so the constraint itself is what refuses the row.
 import pytest
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
+from django.db.models.deletion import Collector
 
 from apps.matches.models import FlagReason, Match, MatchFlag
 from apps.matches.tests.factories import MatchFactory
@@ -78,8 +79,10 @@ def test_flag_protects_both_matches(match: Match, other: Match, protected: str) 
     )
     target = match if protected == "match" else other
 
+    # The ledger guard refuses every Match delete (#26), so the PROTECT
+    # link is checked through Django's deletion collector.
     with pytest.raises(ProtectedError):
-        Match.objects.filter(pk=target.pk).delete()
+        Collector(using="default").collect([target])
 
 
 def test_str_is_the_match_code_and_reason(match: Match, other: Match) -> None:

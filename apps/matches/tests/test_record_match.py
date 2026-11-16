@@ -39,6 +39,7 @@ from apps.matches.services import (
     match_fingerprint,
     record_match,
 )
+from apps.matches.tests.factories import raw_update
 from apps.partners.models import ClubApplicationGrant, PartnerApplication
 from apps.partners.tests.factories import (
     ClubApplicationGrantFactory,
@@ -137,7 +138,7 @@ def _record(
     else:
         values["submitted_by_application"] = submitter
     values.update(overrides)
-    return record_match(**values)
+    return record_match(**values).match
 
 
 def _counts() -> tuple[int, int, int, int]:
@@ -158,7 +159,8 @@ def test_records_match_with_participants_games_and_defaults(
     match = _record(team_a, team_b, submitter=user)
 
     match.refresh_from_db()
-    assert match.status == MatchStatus.PENDING
+    # A Club submission is created confirmed (#26, decision F4).
+    assert match.status == MatchStatus.CONFIRMED
     assert match.format == MatchFormat.DOUBLES
     assert match.played_on == PLAYED_ON
     assert match.game_target == GameTarget.ELEVEN
@@ -462,7 +464,7 @@ def test_near_duplicate_of_a_match_without_fingerprint_is_flagged(
     user: User, team_a: list[Player], team_b: list[Player]
 ) -> None:
     first = _record(team_a, team_b, submitter=user)
-    Match.objects.filter(pk=first.pk).update(fingerprint="")
+    raw_update(first, fingerprint="")
 
     second = _record(team_a, team_b, submitter=user)
 
@@ -524,7 +526,7 @@ def test_same_scores_on_another_day_are_not_a_duplicate(
 
 
 def _void(match: Match) -> None:
-    Match.objects.filter(pk=match.pk).update(status=MatchStatus.VOIDED)
+    raw_update(match, status=MatchStatus.VOIDED)
 
 
 def test_voided_exact_duplicate_is_ignored(
