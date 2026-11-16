@@ -532,28 +532,60 @@ class DuplicateKind(StrEnum):
 
 
 _DUPLICATE_MESSAGES: dict[DuplicateKind, str] = {
-    DuplicateKind.DUPLICATE_MATCH: "This match was already submitted as {code}.",
+    DuplicateKind.DUPLICATE_MATCH: "This match was already submitted",
     DuplicateKind.DUPLICATE_EXTERNAL_ID: (
-        "This application already submitted a match with this external ID: {code}."
+        "This application already submitted a match with this external ID"
     ),
+}
+_CODE_JOINERS: dict[DuplicateKind, str] = {
+    DuplicateKind.DUPLICATE_MATCH: " as ",
+    DuplicateKind.DUPLICATE_EXTERNAL_ID: ": ",
 }
 
 
 class DuplicateMatchError(Exception):
-    """A submission repeats a Match already in the ledger.
+    """A submission repeats an earlier Match.
 
-    ``existing_code`` is that Match's OPEN code. The message is fixed text
-    and the code, never a submitted value.
+    ``existing_code`` is that Match's OPEN code when the submitter may know
+    it (see ``_visible_code``), otherwise None. The message is fixed text
+    and that code, never a submitted value.
     """
 
-    def __init__(self, kind: DuplicateKind, existing_code: str) -> None:
+    def __init__(self, kind: DuplicateKind, existing_code: str | None) -> None:
         self.kind = kind
         self.existing_code = existing_code
         super().__init__(self.message)
 
     @property
     def message(self) -> str:
-        return _DUPLICATE_MESSAGES[self.kind].format(code=self.existing_code)
+        text = _DUPLICATE_MESSAGES[self.kind]
+        if self.existing_code is None:
+            return f"{text}."
+        return f"{text}{_CODE_JOINERS[self.kind]}{self.existing_code}."
+
+
+def _visible_code(
+    existing: Match,
+    submitted_by_user: "_User | None",
+    submitted_by_application: "PartnerApplication | None",
+) -> str | None:
+    """The earlier Match's code, if the submitter may know it, else None.
+
+    The submitter may know it when it submitted that Match (the same
+    Account or Partner Application), or when the submitting Account's
+    Player played in it. Anyone else learns only that such a match exists.
+    """
+    if (
+        submitted_by_application is not None
+        and existing.submitted_by_application_id == submitted_by_application.pk
+    ):
+        return existing.public_code
+    if submitted_by_user is not None and (
+        existing.submitted_by_user_id == submitted_by_user.pk
+        or existing.participants.filter(player__account=submitted_by_user).exists()
+    ):
+        return existing.public_code
+    return None
 
 
 def _issues_from_validation_error(error: ValidationError) -> list[MatchIssue]:
@@ -698,7 +730,10 @@ def _save_new(match: Match) -> None:
             existing = _exact_match(match.fingerprint)
         if existing is None:
             raise
-        raise DuplicateMatchError(kind, existing.public_code) from None
+        code = _visible_code(
+            existing, match.submitted_by_user, match.submitted_by_application
+        )
+        raise DuplicateMatchError(kind, code) from None
 
 
 def record_match(
@@ -787,6 +822,7 @@ def record_match(
             )
             existing = _external_id_match(submitted_by_application, match.external_id)
             if existing is not None:
+                # The same application submitted it, so the code is named.
                 raise DuplicateMatchError(
                     DuplicateKind.DUPLICATE_EXTERNAL_ID, existing.public_code
                 )
@@ -795,7 +831,8 @@ def record_match(
         existing = _exact_match(fingerprint)
         if existing is not None:
             raise DuplicateMatchError(
-                DuplicateKind.DUPLICATE_MATCH, existing.public_code
+                DuplicateKind.DUPLICATE_MATCH,
+                _visible_code(existing, submitted_by_user, submitted_by_application),
             )
         near = _near_matches(keys_a, keys_b, validated.played_on)
 

@@ -17,8 +17,10 @@ pagination raises these) gives one item per key, with code "invalid".
 A `DuplicateMatchError` returns 409 with code "duplicate_match" and one
 item: field `match` and code `duplicate_match` for an exact duplicate, or
 field `external_id` and code `duplicate_external_id` for a repeated
-external id. The message names the earlier match's OPEN code, never a
-submitted value.
+external id. The message is fixed text, never a submitted value. It
+names the earlier match's OPEN code only when `existing_code` is set: the
+submitter sent that match, or the submitting Account's Player played in
+it. A repeated external id always names it.
 
 These handlers do not see a wrong method on a known path (ninja answers with
 a plain-text 405) or a path that matches no operation (Django's 404 page).
@@ -133,7 +135,7 @@ def install_error_handlers(api: NinjaAPI) -> None:
     def on_duplicate_match(
         request: HttpRequest, exc: DuplicateMatchError
     ) -> HttpResponse:
-        # The message is fixed text and the earlier match's code.
+        # Fixed text, plus the earlier match's code when the caller may know it.
         body = ErrorResponse(
             code="duplicate_match",
             message=exc.message,

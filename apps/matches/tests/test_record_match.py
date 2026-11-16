@@ -273,15 +273,77 @@ def test_team_member_must_be_a_saved_player(
 def test_exact_duplicate_from_another_submitter_is_refused(
     user: User, other_user: User, team_a: list[Player], team_b: list[Player]
 ) -> None:
-    first = _record(team_a, team_b, submitter=user)
+    _record(team_a, team_b, submitter=user)
     before = _counts()
 
     with pytest.raises(DuplicateMatchError) as error:
         _record(team_a, team_b, submitter=other_user)
 
     assert error.value.kind == DuplicateKind.DUPLICATE_MATCH
-    assert error.value.existing_code == first.public_code
     assert _counts() == before
+
+
+# Criterion 11: the code is named only to the submitter or a participant.
+
+
+def test_duplicate_names_the_code_to_the_same_account(
+    user: User, team_a: list[Player], team_b: list[Player]
+) -> None:
+    first = _record(team_a, team_b, submitter=user)
+
+    with pytest.raises(DuplicateMatchError) as error:
+        _record(team_a, team_b, submitter=user)
+
+    assert error.value.existing_code == first.public_code
+
+
+def test_duplicate_names_the_code_to_the_same_application(
+    application: PartnerApplication, team_a: list[Player], team_b: list[Player]
+) -> None:
+    first = _record(team_a, team_b, submitter=application, external_id="ext-1")
+
+    with pytest.raises(DuplicateMatchError) as error:
+        _record(team_a, team_b, submitter=application, external_id="ext-2")
+
+    assert error.value.kind == DuplicateKind.DUPLICATE_MATCH
+    assert error.value.existing_code == first.public_code
+
+
+def test_duplicate_names_the_code_to_a_participants_account(
+    user: User, team_a: list[Player], team_b: list[Player]
+) -> None:
+    first = _record(team_a, team_b, submitter=user)
+
+    with pytest.raises(DuplicateMatchError) as error:
+        _record(team_a, team_b, submitter=team_b[1].account)
+
+    assert error.value.existing_code == first.public_code
+
+
+def test_duplicate_hides_the_code_from_an_unrelated_account(
+    user: User, other_user: User, team_a: list[Player], team_b: list[Player]
+) -> None:
+    _record(team_a, team_b, submitter=user)
+
+    with pytest.raises(DuplicateMatchError) as error:
+        _record(team_a, team_b, submitter=other_user)
+
+    assert error.value.existing_code is None
+    assert str(error.value) == "This match was already submitted."
+
+
+def test_duplicate_hides_the_code_from_an_unrelated_application(
+    user: User,
+    application: PartnerApplication,
+    team_a: list[Player],
+    team_b: list[Player],
+) -> None:
+    _record(team_a, team_b, submitter=user)
+
+    with pytest.raises(DuplicateMatchError) as error:
+        _record(team_a, team_b, submitter=application, external_id="ext-1")
+
+    assert error.value.existing_code is None
 
 
 def test_exact_duplicate_with_teams_swapped_and_players_reordered_is_refused(
@@ -290,7 +352,7 @@ def test_exact_duplicate_with_teams_swapped_and_players_reordered_is_refused(
     team_a: list[Player],
     team_b: list[Player],
 ) -> None:
-    first = _record(team_a, team_b, submitter=user)
+    first = _record(team_a, team_b, submitter=application, external_id="ext-1")
     before = _counts()
 
     with pytest.raises(DuplicateMatchError) as error:

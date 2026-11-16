@@ -182,7 +182,7 @@ def test_factory_match_is_found_as_a_duplicate() -> None:
             submitted_by_user=UserFactory.create(),
         )
 
-    assert error.value.existing_code == match.public_code
+    assert error.value.kind == "duplicate_match"
 
 
 @pytest.mark.parametrize("left_out", ["games", "participants"])

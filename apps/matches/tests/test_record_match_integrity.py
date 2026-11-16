@@ -127,6 +127,20 @@ def test_fingerprint_constraint_becomes_duplicate_match_error(
     assert _counts() == before
 
 
+def test_fingerprint_constraint_hides_the_code_from_an_unrelated_account(
+    monkeypatch: pytest.MonkeyPatch, players: tuple[list[Player], list[Player]]
+) -> None:
+    team_a, team_b = players
+    _record(team_a, team_b, submitted_by_user=UserFactory.create())
+    _miss_first_lookup(monkeypatch, "_exact_match")
+
+    with pytest.raises(DuplicateMatchError) as error:
+        _record(team_a, team_b, submitted_by_user=UserFactory.create())
+
+    assert error.value.kind == DuplicateKind.DUPLICATE_MATCH
+    assert error.value.existing_code is None
+
+
 def test_external_id_constraint_becomes_duplicate_external_id_error(
     monkeypatch: pytest.MonkeyPatch, players: tuple[list[Player], list[Player]]
 ) -> None:

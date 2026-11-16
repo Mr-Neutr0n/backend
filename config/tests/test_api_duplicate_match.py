@@ -14,15 +14,30 @@ from config.api_errors import ErrorResponse
 EXISTING_CODE = "M-0000-0000-0000"
 
 
-def _client(kind: DuplicateKind) -> TestClient:
+def _client(kind: DuplicateKind, code: str | None = EXISTING_CODE) -> TestClient:
     """An API with one test-only operation, never mounted in the URLconf."""
     api = OpenNinjaAPI(urls_namespace=f"test-{uuid.uuid4().hex}")
 
     @api.post("/matches", operation_id="submit_duplicate")
     def submit_duplicate(request: HttpRequest) -> None:
-        raise DuplicateMatchError(kind, EXISTING_CODE)
+        raise DuplicateMatchError(kind, code)
 
     return TestClient(api)
+
+
+def test_duplicate_match_error_without_a_code_returns_fixed_text() -> None:
+    message = "This match was already submitted."
+
+    response = _client(DuplicateKind.DUPLICATE_MATCH, None).post("/matches")
+
+    assert response.status_code == 409
+    body = ErrorResponse.model_validate(response.json())
+    assert body.code == "duplicate_match"
+    assert body.message == message
+    assert [error.model_dump() for error in body.errors] == [
+        {"field": "match", "code": "duplicate_match", "message": message}
+    ]
+    assert "M-" not in response.content.decode()
 
 
 @pytest.mark.parametrize(
