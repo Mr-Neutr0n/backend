@@ -61,19 +61,24 @@ def _list(name: str) -> list[str]:
     return [item.strip() for item in _raw(name).split(",") if item.strip()]
 
 
-def _positive_days(name: str) -> int | None:
-    """A whole number of days, 1 or more, or None when unset or empty.
+_MAX_DAYS = 36500
 
-    Only ASCII digits are accepted. The error names the variable and never
-    echoes its value.
+
+def _positive_days(name: str) -> int | None:
+    """A whole number of days from 1 to 36500, or None when unset or empty.
+
+    Only ASCII digits are accepted, at most 5 of them, checked before the
+    conversion, so a huge value never reaches ``int()`` or a date
+    calculation. The error names the variable and the range and never
+    echoes the value.
     """
     value = _raw(name).strip()
     if not value:
         return None
-    if not re.fullmatch(r"[0-9]+", value) or int(value) < 1:
+    if not re.fullmatch(r"[0-9]{1,5}", value) or not 1 <= int(value) <= _MAX_DAYS:
         raise ImproperlyConfigured(
-            f"Set {name} to a whole number of days, 1 or more, or leave it "
-            "empty (see .env.example)."
+            f"Set {name} to a whole number of days from 1 to {_MAX_DAYS}, or "
+            "leave it empty (see .env.example)."
         )
     return int(value)
 
