@@ -39,7 +39,7 @@ def _set_fingerprint(match: Match, fingerprint: str) -> None:
     Match.objects.filter(pk=match.pk).update(fingerprint=fingerprint)
 
 
-def test_two_counted_matches_cannot_share_a_fingerprint() -> None:
+def test_two_matches_not_voided_cannot_share_a_fingerprint() -> None:
     _set_fingerprint(_bare_match(), FINGERPRINT)
     second = _bare_match()
 
@@ -51,9 +51,9 @@ def test_two_counted_matches_cannot_share_a_fingerprint() -> None:
 
 def test_a_voided_match_may_share_a_fingerprint() -> None:
     _set_fingerprint(_bare_match(status=MatchStatus.VOIDED), FINGERPRINT)
-    counted = _bare_match()
+    pending = _bare_match()
 
-    _set_fingerprint(counted, FINGERPRINT)
+    _set_fingerprint(pending, FINGERPRINT)
 
     assert Match.objects.filter(fingerprint=FINGERPRINT).count() == 2
 

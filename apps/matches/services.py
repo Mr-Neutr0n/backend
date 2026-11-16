@@ -6,7 +6,9 @@ tools, partner imports) calls ``record_match``, which calls
 reaches the ledger (CLAUDE.md, hard rule 3). ``validate_match`` takes plain
 values and does no database access.
 
-``record_match`` also detects duplicates (a security-sensitive area,
+``record_match`` first runs every model rule on the Match, its
+participants, and its games, so nothing invalid reaches a lock, a lookup,
+or the database. It then detects duplicates (a security-sensitive area,
 CLAUDE.md hard rule 8). In one transaction, under advisory locks, it:
 
 - refuses an external id the same Partner Application already used, for a
@@ -14,11 +16,15 @@ CLAUDE.md hard rule 8). In one transaction, under advisory locks, it:
 - refuses an exact duplicate: a Match that is not voided, with the same
   fingerprint, that is the same two teams in either order, the same date
   played, and the same game scores (``DuplicateKind.DUPLICATE_MATCH``);
-- saves a near duplicate (a Match that is not voided, with the same two teams and date
-  but other scores) and flags it with one ``MatchFlag`` per earlier Match.
+- saves a near duplicate (a Match that is not voided, with the same two
+  teams and date but other scores) and flags it with one ``MatchFlag`` per
+  earlier Match.
 
-A refusal raises ``DuplicateMatchError`` naming the earlier Match's OPEN
-code. The database backs the exact rule with a partial unique constraint
+A refusal raises ``DuplicateMatchError``. It names the earlier Match's
+OPEN code only when the submitter may know it: the same Account or
+Partner Application submitted that Match, or the submitting Account's
+Player played in it. Anyone else learns only that such a match exists.
+The database backs the exact rule with a partial unique constraint
 on the fingerprint, and the external id rule with its own constraint. A
 concurrent insert that trips either still raises ``DuplicateMatchError``.
 The same teams playing the same scores twice on one day count as one
@@ -98,9 +104,13 @@ WIN_MARGIN = 2
 class MatchIssue:
     """One problem with a submission.
 
-    ``field`` is ``format``, ``team_a``, ``team_b``, ``games``,
-    ``games.<i>`` (0-based), ``played_on``, ``best_of``, ``game_target``, or
-    ``scoring_type``.
+    From ``validate_match``, ``field`` is ``format``, ``team_a``,
+    ``team_b``, ``games``, ``games.<i>`` (0-based), ``played_on``,
+    ``best_of``, ``game_target``, or ``scoring_type``. ``record_match``
+    also reports the model's rules: a ``Match`` field's name (such as
+    ``external_id``, ``played_on``, or ``submitted_by_user``), ``match`` for
+    a rule on the whole Match, ``games.<i>`` for a game's field, and
+    ``team_a`` or ``team_b`` for a participant's.
     """
 
     field: str
@@ -765,6 +775,12 @@ def record_match(
     external id, and writes nothing in either case. A near duplicate is
     saved with one ``possible_duplicate`` flag per earlier Match. The new
     Match has the model's default status (#26 owns confirmation).
+
+    Call it once per transaction. Its advisory locks last until the
+    outermost transaction ends, so two callers that each record several
+    matches inside one outer ``transaction.atomic()``, in different
+    orders, can deadlock. A batch that must be atomic should sort its
+    submissions by lineup lock key (``_lineup_lock_key``) first.
     """
     keys_a = _player_keys(team_a)
     keys_b = _player_keys(team_b)
