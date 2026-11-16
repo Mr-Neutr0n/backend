@@ -780,9 +780,10 @@ def record_match(
     submitter may not submit this match (checked first, before any
     validation, lookup, lock, or write), ``MatchValidationError`` for a
     score or model rule, ``DuplicateMatchError`` for an exact duplicate or
-    a repeated external id, and writes nothing in any of these cases. With
-    no submitter or two, the permission check is skipped and the model
-    rules refuse it as a ``MatchValidationError``. A near duplicate is
+    a repeated external id, and writes nothing in any of these cases. Every
+    submitter given is checked. With no submitter there is nothing to
+    check, and with two permitted ones the model rules refuse the match as
+    a ``MatchValidationError``. A near duplicate is
     saved with one ``possible_duplicate`` flag per earlier Match. The new
     Match has the model's default status (#26 owns confirmation).
 
@@ -797,14 +798,15 @@ def record_match(
     """
     keys_a = _player_keys(team_a)
     keys_b = _player_keys(team_b)
-    # Exactly one submitter is checked. Zero or two fail the model rules
-    # in _clean_all, before anything is written.
+    # Every submitter given is checked, so an unsaved second one cannot
+    # skip the check. Zero, or two permitted ones, fail the model's
+    # one-submitter rule in _clean_all, before anything is written.
     submission = MatchSubmission(
         event=event, club=club, player_ids=frozenset(keys_a + keys_b)
     )
-    if submitted_by_user is not None and submitted_by_application is None:
+    if submitted_by_user is not None:
         check_can_create_match(submitted_by_user, submission)
-    elif submitted_by_application is not None and submitted_by_user is None:
+    if submitted_by_application is not None:
         check_can_create_match(submitted_by_application, submission)
     validated = validate_match(
         format=format,
