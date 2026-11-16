@@ -2,6 +2,7 @@
 
 import pytest
 
+from apps.accounts.tests.factories import UserFactory
 from apps.matches.models import (
     BestOf,
     Game,
@@ -13,12 +14,14 @@ from apps.matches.models import (
     ScoringType,
     Team,
 )
+from apps.matches.services import DuplicateMatchError, match_fingerprint, record_match
 from apps.matches.tests.factories import (
     DoublesMatchFactory,
     GameFactory,
     MatchFactory,
     MatchParticipantFactory,
 )
+from apps.players.models import Player
 
 pytestmark = pytest.mark.django_db
 
@@ -140,3 +143,53 @@ def test_game_and_participant_factories() -> None:
     assert Game.objects.filter(match=match, game_number=2).get() == game
     assert MatchParticipant.objects.filter(match=match).count() == 3
     assert participant.player is not None
+
+
+def _submission(
+    match: Match,
+) -> tuple[list[Player], list[Player], list[tuple[int, int]]]:
+    """The match's teams and games as record_match takes them."""
+    team_a = [p.player for p in match.participants.filter(team=Team.A)]
+    team_b = [p.player for p in match.participants.filter(team=Team.B)]
+    games = [(g.team_a_score, g.team_b_score) for g in match.games.all()]
+    return team_a, team_b, games
+
+
+@pytest.mark.parametrize("factory", [MatchFactory, DoublesMatchFactory])
+def test_factory_sets_the_fingerprint_record_match_would(
+    factory: type[MatchFactory],
+) -> None:
+    match = factory.create(best_of_3=True)
+    match.refresh_from_db()
+    team_a, team_b, games = _submission(match)
+
+    assert match.fingerprint == match_fingerprint(
+        [p.pk for p in team_a], [p.pk for p in team_b], match.played_on, games
+    )
+
+
+def test_factory_match_is_found_as_a_duplicate() -> None:
+    match = DoublesMatchFactory.create(best_of_3=True)
+    team_a, team_b, games = _submission(match)
+
+    with pytest.raises(DuplicateMatchError) as error:
+        record_match(
+            format=match.format,
+            team_a=team_a,
+            team_b=team_b,
+            games=games,
+            played_on=match.played_on,
+            submitted_by_user=UserFactory.create(),
+        )
+
+    assert error.value.existing_code == match.public_code
+
+
+@pytest.mark.parametrize("left_out", ["games", "participants"])
+def test_factory_match_without_games_or_players_has_no_fingerprint(
+    left_out: str,
+) -> None:
+    match = MatchFactory.create(**{left_out: False})
+    match.refresh_from_db()
+
+    assert match.fingerprint == ""
