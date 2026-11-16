@@ -628,6 +628,22 @@ def _advisory_lock(key: int) -> None:
         cursor.execute("SELECT pg_advisory_xact_lock(%s)", [key])
 
 
+def advisory_lock(key: int) -> None:
+    """Wait for and hold an advisory lock until the transaction ends."""
+    _advisory_lock(key)
+
+
+def try_advisory_lock(key: int) -> bool:
+    """Hold an advisory lock until the transaction ends, if free now.
+
+    Returns False, without waiting, when another session holds it.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_try_advisory_xact_lock(%s)", [key])
+        row = cursor.fetchone()
+    return bool(row and row[0])
+
+
 def _external_id_match(
     application: "PartnerApplication", external_id: str
 ) -> Match | None:
@@ -927,6 +943,14 @@ def exact_duplicate(draft: MatchDraft) -> Match | None:
     Call after ``lock_draft``.
     """
     return _exact_match(draft.match.fingerprint)
+
+
+def near_duplicates(draft: MatchDraft) -> list[Match]:
+    """Matches that are not voided with the draft's lineup and date.
+
+    Call after ``lock_draft``.
+    """
+    return _near_matches(draft.keys_a, draft.keys_b, draft.match.played_on)
 
 
 def duplicate_error(

@@ -33,9 +33,13 @@ Audit Event in its transaction; a repeated action that changes nothing
 writes none. Signals (``apps.matches.signals``) are sent inside the
 transaction, after the rows and the Audit Event.
 
-Lock order: ``edit_match`` takes its advisory locks before the row lock,
-as ``record_match`` does, so the two never wait on each other in opposite
-orders. The other services take only the row lock.
+Lock order: every service takes advisory locks before the row lock, as
+``record_match`` does, so no two paths wait on each other in opposite
+orders. Each takes the match's lineup lock (``record_match``'s key for its
+players and date), so whether flag-linked matches count, which decides
+hold and release signals, is read and changed one transaction at a time.
+``edit_match`` also takes the external id lock and the new lineup's lock.
+Expiry only tries the lineup lock and skips a match it cannot get.
 """
 
 import logging
@@ -69,6 +73,7 @@ from apps.matches.permissions import (
     participant_player,
 )
 from apps.matches.services import (
+    advisory_lock,
     audit_actor,
     check_external_id,
     draft_match,
@@ -76,7 +81,9 @@ from apps.matches.services import (
     exact_duplicate,
     insert_draft,
     lock_draft,
+    near_duplicates,
     stored_lineup_lock_key,
+    try_advisory_lock,
 )
 from apps.matches.signals import MatchChange, match_changed, match_confirmed
 from apps.players.models import Player
@@ -95,9 +102,21 @@ class MatchStateError(ValueError):
         super().__init__(self.message)
 
 
-def _lock(match: Match) -> Match:
+def _lock_row(match: Match) -> Match:
     """The match's row, locked until the transaction ends."""
     return Match.objects.select_for_update().get(pk=match.pk)
+
+
+def _lock(match: Match) -> Match:
+    """Take the match's lineup lock, then its row lock, and return the row.
+
+    The lineup lock is the one ``record_match`` takes for this lineup and
+    date, so whether flag-linked matches count (they share it) is read and
+    changed by one transaction at a time. A match's lineup never changes,
+    so the key can be read before the lock.
+    """
+    advisory_lock(stored_lineup_lock_key(match))
+    return _lock_row(match)
 
 
 def _linked(match: Match) -> list[Match]:
@@ -430,22 +449,17 @@ def edit_match(
     )
     with transaction.atomic():
         lock_draft(draft, also=[stored_lineup_lock_key(stored)])
-        locked = _lock(match)
+        locked = _lock_row(match)
         if locked.status == MatchStatus.VOIDED:
             raise MatchStateError
         if locked.status == MatchStatus.DISPUTED and not moderator:
             raise MatchStateError
         old_status = MatchStatus(locked.status)
         was_counting = locked.is_counted()
+        # Only matches the held locks cover: those flagged with the old match
+        # (its lineup) and near duplicates of the new lineup and date.
         others = _linked(locked) + [
-            near
-            for near in Match.objects.filter(
-                played_on=draft.match.played_on,
-                participants__player_id__in=draft.keys_a + draft.keys_b,
-            )
-            .exclude(status=MatchStatus.VOIDED)
-            .exclude(pk=locked.pk)
-            .distinct()
+            near for near in near_duplicates(draft) if near.pk != locked.pk
         ]
         counting = _counting(others)
         before = _set_status(locked, MatchStatus.VOIDED)
@@ -506,6 +520,10 @@ def expire_unconfirmed_matches(now: datetime | None = None) -> int:
     expired = 0
     for pk in candidates:
         with transaction.atomic():
+            # Never wait: a match whose lineup another transaction holds is
+            # left for the next run.
+            if not try_advisory_lock(stored_lineup_lock_key(Match(pk=pk))):
+                continue
             locked = (
                 Match.objects.select_for_update(skip_locked=True)
                 .filter(pk=pk, status=MatchStatus.PENDING, created_at__lt=cutoff)
