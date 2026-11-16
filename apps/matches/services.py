@@ -71,12 +71,13 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 from oauth2_provider.models import get_application_model
 
-from apps.audit.models import AuditAction
+from apps.audit.models import AuditAction, AuditEvent
 from apps.audit.services import record_event, snapshot
 from apps.matches.models import (
     MAX_GAMES,
@@ -984,12 +985,35 @@ def send_holds(held: Sequence[Match]) -> None:
         )
 
 
+def _confirmed_by(match: Match, actor: "Actor") -> bool:
+    """True when ``actor`` moved ``match`` from pending to confirmed.
+
+    That is a ``match.confirm`` Audit Event on ``match`` naming ``actor``,
+    other than the one ``record_match`` writes when it creates a match
+    confirmed (``before`` is empty there): a plain repeat of a submission
+    that created the match is still refused with its code (ADR 0011).
+    """
+    events = AuditEvent.objects.filter(
+        action=AuditAction.MATCH_CONFIRM,
+        target_content_type=ContentType.objects.get_for_model(Match),
+        target_object_id=str(match.pk),
+        before__isnull=False,
+    )
+    if isinstance(actor, get_application_model()):
+        return events.filter(actor_application_id=actor.pk).exists()
+    return events.filter(actor_user_id=actor.pk).exists()
+
+
 def _confirm_pending_duplicate(existing: Match, actor: "Actor") -> Match | None:
     """Confirm ``existing`` if it is still pending, under a row lock.
 
-    Returns the confirmed Match, or None when it is no longer pending.
+    Returns the confirmed Match, or None when it is no longer pending. A
+    confirmed Match that ``actor`` itself confirmed (a retry of the same
+    submission) is returned unchanged, with no new Audit Event or signal.
     """
     locked = Match.objects.select_for_update().get(pk=existing.pk)
+    if locked.status == MatchStatus.CONFIRMED and _confirmed_by(locked, actor):
+        return locked
     if locked.status != MatchStatus.PENDING:
         return None
     before = snapshot(locked, ["status"])
@@ -1046,8 +1070,12 @@ def record_match(
     ``match_confirmed`` signal. A self-submission (no Event, no Club,
     decision F1) is created pending. Such a submitter's exact duplicate of
     a pending Match confirms that Match the same way instead of raising,
-    and returns it with ``created=False``. An exact duplicate of a Match in
-    any other status, or from a self-submitter, still raises. Each earlier
+    and returns it with ``created=False``. A retry of that submission by the
+    same submitter returns the same result, with no new Audit Event or
+    signal. The submission's external id is not stored on that Match, so
+    the application may use it again later (accepted). An exact duplicate
+    of a Match in any other status, or from a self-submitter, still
+    raises. Each earlier
     match that was counting and is now held by a new flag gets
     ``match_changed`` with ``change=hold``. Signals are sent inside the
     transaction (``apps.matches.signals``).
