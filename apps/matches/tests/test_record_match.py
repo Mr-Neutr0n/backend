@@ -39,6 +39,7 @@ from apps.matches.services import (
     match_fingerprint,
     record_match,
 )
+from apps.matches.tests.factories import raw_update
 from apps.partners.models import ClubApplicationGrant, PartnerApplication
 from apps.partners.tests.factories import (
     ClubApplicationGrantFactory,
@@ -462,7 +463,7 @@ def test_near_duplicate_of_a_match_without_fingerprint_is_flagged(
     user: User, team_a: list[Player], team_b: list[Player]
 ) -> None:
     first = _record(team_a, team_b, submitter=user)
-    Match.objects.filter(pk=first.pk).update(fingerprint="")
+    raw_update(first, fingerprint="")
 
     second = _record(team_a, team_b, submitter=user)
 
@@ -524,7 +525,7 @@ def test_same_scores_on_another_day_are_not_a_duplicate(
 
 
 def _void(match: Match) -> None:
-    Match.objects.filter(pk=match.pk).update(status=MatchStatus.VOIDED)
+    raw_update(match, status=MatchStatus.VOIDED)
 
 
 def test_voided_exact_duplicate_is_ignored(

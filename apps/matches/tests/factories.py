@@ -6,6 +6,7 @@ Made-up data only, never real player data.
 from datetime import date
 from typing import Any
 
+from django.db.models import QuerySet
 from factory.declarations import LazyFunction, SubFactory, Trait
 from factory.django import DjangoModelFactory
 from factory.helpers import post_generation
@@ -24,9 +25,14 @@ from apps.matches.models import (
 )
 from apps.matches.services import match_fingerprint
 from apps.partners.tests.factories import PartnerApplicationFactory
+from apps.players.models import Player
 from apps.players.tests.factories import PlayerFactory
 
 _faker = Faker()
+
+# Where the hooks keep the rows they chose until insert_rows saves them.
+_PLANNED_PARTICIPANTS = "_factory_planned_participants"
+_PLANNED_GAMES = "_factory_planned_games"
 
 PLAYERS_PER_TEAM = {MatchFormat.SINGLES: 1, MatchFormat.DOUBLES: 2}
 
@@ -90,6 +96,11 @@ class MatchFactory(DjangoModelFactory[Match]):
     to leave those out. A match with both gets the fingerprint
     ``record_match`` would give it, so it is found as a duplicate; one
     without either has a blank fingerprint.
+
+    The ledger guard refuses to save an existing Match again (#26), so the
+    Match is inserted once, by the last hook, after its players and scores
+    are chosen and its fingerprint is known. Its participants and games
+    are inserted after it.
     """
 
     class Meta:
@@ -115,53 +126,74 @@ class MatchFactory(DjangoModelFactory[Match]):
     scoring_type = ScoringType.SIDE_OUT
     submitted_by_user = SubFactory(UserFactory)  # type: ignore[no-untyped-call]
 
+    @classmethod
+    def _create(cls, model_class: type[Match], *args: Any, **kwargs: Any) -> Match:
+        # Built, not saved: the insert_rows hook saves it once.
+        return model_class(*args, **kwargs)
+
     @post_generation  # type: ignore[untyped-decorator]
     def participants(self: Match, create: bool, extracted: Any, **kwargs: Any) -> None:
+        planned: list[tuple[Player, Team]] = []
+        setattr(self, _PLANNED_PARTICIPANTS, planned)
         if not create or extracted is False:
             return
         for team in Team:
             for _ in range(PLAYERS_PER_TEAM[MatchFormat(self.format)]):
-                MatchParticipantFactory.create(match=self, team=team)
+                planned.append((PlayerFactory.create(), team))
 
     @post_generation  # type: ignore[untyped-decorator]
     def games(self: Match, create: bool, extracted: Any, **kwargs: Any) -> None:
+        planned: list[tuple[int, int]] = []
+        setattr(self, _PLANNED_GAMES, planned)
         if not create or extracted is False:
             return
         target = int(self.game_target)
-        for number, winner in enumerate(_game_winners(int(self.best_of)), start=1):
+        for winner in _game_winners(int(self.best_of)):
             loser_score = _faker.random_int(min=0, max=target - 2)
-            a, b = (target, loser_score) if winner == Team.A else (loser_score, target)
-            GameFactory.create(
-                match=self, game_number=number, team_a_score=a, team_b_score=b
+            planned.append(
+                (target, loser_score) if winner == Team.A else (loser_score, target)
             )
 
     @post_generation  # type: ignore[untyped-decorator]
-    def set_fingerprint(
-        self: Match, create: bool, extracted: Any, **kwargs: Any
-    ) -> None:
-        """Fingerprint a match that has players and games, as record_match does.
+    def insert_rows(self: Match, create: bool, extracted: Any, **kwargs: Any) -> None:
+        """Fingerprint the match as record_match does, then insert everything.
 
         Test setup only, not a ledger edit path. Runs after the participant
         and game hooks. A fingerprint passed to the factory is kept. The
-        hook's name differs from the field's, so factory_boy passes that
-        value to the model instead of to this hook.
+        hooks' names differ from the fields', so factory_boy passes those
+        values to the model instead of to a hook.
         """
-        if not create or self.fingerprint:
+        if not create:
             return
-        participants = list(self.participants.all())
-        games = [(g.team_a_score, g.team_b_score) for g in self.games.all()]
-        if not participants or not games:
-            return
-        teams = {
-            team: [p.player_id for p in participants if p.team == team] for team in Team
-        }
-        self.fingerprint = match_fingerprint(
-            teams[Team.A], teams[Team.B], self.played_on, games
-        )
-        self.save(update_fields=["fingerprint"])
+        participants: list[tuple[Player, Team]] = getattr(self, _PLANNED_PARTICIPANTS)
+        games: list[tuple[int, int]] = getattr(self, _PLANNED_GAMES)
+        if not self.fingerprint and participants and games:
+            teams = {
+                team: [player.pk for player, side in participants if side == team]
+                for team in Team
+            }
+            self.fingerprint = match_fingerprint(
+                teams[Team.A], teams[Team.B], self.played_on, games
+            )
+        self.save()
+        for player, team in participants:
+            MatchParticipant.objects.create(match=self, player=player, team=team)
+        for number, (a, b) in enumerate(games, start=1):
+            Game.objects.create(
+                match=self, game_number=number, team_a_score=a, team_b_score=b
+            )
 
 
 class DoublesMatchFactory(MatchFactory):
     """A MatchFactory match in doubles: two players per team."""
 
     format = MatchFormat.DOUBLES
+
+
+def raw_update(match: Match, **values: Any) -> None:
+    """Change a Match row as a raw write would, skipping the ledger guard.
+
+    Test setup only: it stands in for a row written outside the workflow
+    services (raw SQL, a fixture), which the ORM guard does not cover.
+    """
+    QuerySet(model=Match).filter(pk=match.pk).update(**values)

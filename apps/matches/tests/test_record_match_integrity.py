@@ -23,7 +23,7 @@ from apps.matches.models import (
     MatchStatus,
 )
 from apps.matches.services import DuplicateKind, DuplicateMatchError, record_match
-from apps.matches.tests.factories import MatchFactory
+from apps.matches.tests.factories import MatchFactory, raw_update
 from apps.partners.models import PartnerApplication
 from apps.partners.tests.factories import (
     ClubApplicationGrantFactory,
@@ -43,7 +43,7 @@ def _bare_match(**overrides: object) -> Match:
 
 
 def _set_fingerprint(match: Match, fingerprint: str) -> None:
-    Match.objects.filter(pk=match.pk).update(fingerprint=fingerprint)
+    raw_update(match, fingerprint=fingerprint)
 
 
 def test_two_matches_not_voided_cannot_share_a_fingerprint() -> None:

@@ -3,15 +3,16 @@
 A Match is one entry in the match ledger (CONTEXT.md, Match and Ledger).
 The ledger is append-only (CLAUDE.md, hard rule 3): a counted match is
 never edited in place or deleted. A correction is a new record that
-references the old one. #26 adds the service that makes those changes, with
-its Audit Events. Until then nothing in the backend changes a Match after
-it is created.
+references the old one. The workflow services in ``apps.matches.workflow``
+make every change, with their Audit Events.
 
-Games and participants use ``PROTECT``, so the ORM refuses to delete a Match
-that has either. That is not a full guard: a Match with neither can still be
-deleted, ``QuerySet.update`` and raw SQL can still change rows, and nothing
-yet stops an edit through ``save()``. #26 owes the full delete and edit
-guard.
+The ORM guards the ledger (``MatchImmutable``): no Match, Match
+Participant, Game, or Match Confirmation can be deleted; an existing Match
+can be saved only with ``update_fields=["status"]``; the other three are
+inserted once and never saved again; and ``QuerySet.update``, ``delete``,
+``bulk_update``, and an upsert through ``bulk_create`` raise on all four,
+through the default and the base manager. Raw SQL and raw saves
+(``loaddata``) are not guarded.
 
 These models enforce only what a database constraint can: the allowed
 values of each choice, one submitter, a ``played_at`` that agrees with its
@@ -34,9 +35,9 @@ Event's kind, or is self-reported when there is no Event (decision F1 in
 """
 
 import datetime
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from datetime import UTC, timedelta
-from typing import ClassVar
+from typing import Any, ClassVar, NoReturn
 
 from django.conf import settings
 from django.core.exceptions import FieldDoesNotExist, ValidationError
@@ -171,6 +172,106 @@ def _foreign_key(
     except FieldDoesNotExist:
         return None
     return field if isinstance(field, models.ForeignKey) else None
+
+
+class MatchImmutable(RuntimeError):
+    """Raised when code tries to change or delete a ledger row.
+
+    The message is fixed text.
+    """
+
+    message: ClassVar[str] = (
+        "The match ledger is append-only: a match, its players, its games, and "
+        "its confirmations cannot be changed or deleted."
+    )
+
+    def __init__(self) -> None:
+        super().__init__(self.message)
+
+
+class LedgerQuerySet[LedgerModelT: models.Model](models.QuerySet[LedgerModelT]):
+    """Refuses bulk changes and deletes of ledger rows before any SQL runs.
+
+    ``bulk_create`` still inserts, but an upsert (``update_conflicts``) is
+    refused, since it would update an existing row.
+    """
+
+    def update(self, **kwargs: Any) -> NoReturn:
+        raise MatchImmutable
+
+    def delete(self) -> NoReturn:
+        raise MatchImmutable
+
+    def bulk_update(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise MatchImmutable
+
+    def bulk_create(
+        self,
+        objs: Iterable[LedgerModelT],
+        batch_size: int | None = None,
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+        update_fields: Collection[str] | None = None,
+        unique_fields: Collection[str] | None = None,
+    ) -> list[LedgerModelT]:
+        if update_conflicts:
+            raise MatchImmutable
+        return super().bulk_create(
+            objs,
+            batch_size=batch_size,
+            ignore_conflicts=ignore_conflicts,
+            update_fields=update_fields,
+            unique_fields=unique_fields,
+        )
+
+
+class _InsertOnlyModel(models.Model):
+    """A ledger row that is inserted once and never saved again or deleted.
+
+    Only a new instance with no primary key may be saved, as a plain
+    insert. Raw writes (``loaddata``, raw SQL) skip this.
+    """
+
+    class Meta:
+        abstract = True
+
+    def save_base(
+        self,
+        raw: bool = False,
+        force_insert: bool | tuple[models.base.ModelBase, ...] = False,
+        force_update: bool = False,
+        using: str | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
+        if (
+            force_update
+            or update_fields is not None
+            or not self._state.adding
+            or self.pk is not None
+        ):
+            raise MatchImmutable
+        super().save_base(
+            raw=raw,
+            force_insert=force_insert,
+            force_update=force_update,
+            using=using,
+            update_fields=update_fields,
+        )
+
+    def delete(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise MatchImmutable
+
+
+class MatchQuerySet(LedgerQuerySet["Match"]):
+    """Matches, with the ledger guard."""
+
+
+class MatchParticipantQuerySet(LedgerQuerySet["MatchParticipant"]):
+    """Match Participants, with the ledger guard."""
+
+
+class GameQuerySet(LedgerQuerySet["Game"]):
+    """Games, with the ledger guard."""
 
 
 class MatchFormat(models.TextChoices):
@@ -341,8 +442,13 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = MatchQuerySet.as_manager()
+
     class Meta:
         verbose_name_plural = "matches"
+        # Django's internal queries use the base manager, so it must be the
+        # guarded one too.
+        base_manager_name = "objects"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=(
@@ -420,6 +526,24 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
         # The OPEN Code, never a name, for one rule with Club and Event.
         return self.public_code
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Insert a new Match, or save only the status of an existing one.
+
+        An existing Match may be saved only with ``update_fields`` naming
+        ``status`` alone, which the workflow services in
+        ``apps.matches.workflow`` do under a row lock. Any other save of an
+        existing Match raises ``MatchImmutable``. Raw writes (``loaddata``,
+        raw SQL) skip this.
+        """
+        if not self._state.adding:
+            update_fields = kwargs.get("update_fields")
+            if update_fields is None or set(update_fields) != {"status"}:
+                raise MatchImmutable
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> NoReturn:
+        raise MatchImmutable
+
     def clean(self) -> None:
         # Django runs clean() even when a field failed, so a value may still
         # be the raw input here: check its type before using it.
@@ -457,8 +581,11 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
             raise ValidationError(errors)
 
 
-class MatchParticipant(_LinkMessagesModel):
-    """A Player on one team of a Match. A Player plays once per Match."""
+class MatchParticipant(_LinkMessagesModel, _InsertOnlyModel):
+    """A Player on one team of a Match. A Player plays once per Match.
+
+    Inserted once with its Match and never saved again or deleted.
+    """
 
     match = models.ForeignKey(
         Match,
@@ -474,7 +601,10 @@ class MatchParticipant(_LinkMessagesModel):
     )
     team = models.CharField(max_length=1, choices=Team, error_messages=CHOICE_MESSAGES)
 
+    objects = MatchParticipantQuerySet.as_manager()
+
     class Meta:
+        base_manager_name = "objects"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=Q(team__in=Team.values),
@@ -492,8 +622,11 @@ class MatchParticipant(_LinkMessagesModel):
         return f"{self.match.public_code} team {self.team}"
 
 
-class Game(_LinkMessagesModel):
-    """One game of a Match, numbered from 1. Scores are never negative."""
+class Game(_LinkMessagesModel, _InsertOnlyModel):
+    """One game of a Match, numbered from 1. Scores are never negative.
+
+    Inserted once with its Match and never saved again or deleted.
+    """
 
     match = models.ForeignKey(
         Match,
@@ -505,8 +638,11 @@ class Game(_LinkMessagesModel):
     team_a_score = models.PositiveSmallIntegerField(error_messages=_NUMBER_MESSAGES)
     team_b_score = models.PositiveSmallIntegerField(error_messages=_NUMBER_MESSAGES)
 
+    objects = GameQuerySet.as_manager()
+
     class Meta:
         ordering = ("match", "game_number")
+        base_manager_name = "objects"
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=Q(game_number__gte=1, game_number__lte=MAX_GAMES),
