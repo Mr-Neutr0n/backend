@@ -43,7 +43,10 @@ The confirmation workflow (#26, ``apps.matches.workflow``) adds:
   dispute it.
 - ``can_confirm_as_organizer``: event authority over the stored match's
   Event (as above). Such an actor's confirmation confirms a pending match
-  alone. Club authority alone does not.
+  alone. Club authority alone does not, through ``confirm_match``. But
+  ``record_match``'s duplicate path does confirm one: any permitted
+  submitter of a match with an Event or a Club, a Club's included, whose
+  exact duplicate matches a pending match confirms it (user decision).
 - ``is_moderator``: an active Account with the ``matches.moderate_match``
   permission. A moderator may void and edit any match and resolve
   disputes.
