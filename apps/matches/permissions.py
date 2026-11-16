@@ -32,8 +32,24 @@ A match with neither needs self-submission.
 may change only a match it submitted, while it is approved. An Account
 may change a match whose Event's verified Organizer it is a member of, or
 a match at a Club where it holds the admin Club Role. A match manager, a
-self-submitter, and a participant may not. Moderators act through #26's
-change service from #40's admin, not through this function.
+self-submitter, and a participant may not. Moderators act through the
+change services in ``apps.matches.workflow`` (from #40's admin), not
+through this function.
+
+The confirmation workflow (#26, ``apps.matches.workflow``) adds:
+
+- ``participant_player``: the actor's Player when the actor is an active
+  Account whose Player plays in the match. A participant may confirm or
+  dispute it.
+- ``can_confirm_as_organizer``: event authority over the stored match's
+  Event (as above). Such an actor's confirmation confirms a pending match
+  alone. Club authority alone does not.
+- ``is_moderator``: an active Account with the ``matches.moderate_match``
+  permission. A moderator may void and edit any match and resolve
+  disputes.
+
+A refused workflow action raises ``MatchActionDenied``, with fixed text
+that never says which rule failed or what state the match is in.
 
 No rule reads payment status or paid entitlements, and no function takes
 such input (hard rule 7).
@@ -229,3 +245,67 @@ def can_change_match(actor: Actor, match: Match) -> bool:
     if _account_event_authority(account, event_id):
         return True
     return _account_club_authority(account, club_id, (MemberRole.ADMIN,))
+
+
+MODERATE_PERMISSION = "matches.moderate_match"
+
+
+class MatchActionDenied(PermissionError):
+    """The actor may not confirm, dispute, or change this match.
+
+    The message is fixed text. It never says which rule failed, or
+    anything about the match's state.
+    """
+
+    message: ClassVar[str] = "You are not allowed to change this match."
+
+    def __init__(self) -> None:
+        super().__init__(self.message)
+
+
+def participant_player(actor: Actor, match: Match) -> Player | None:
+    """The actor's Player when the actor is an active Account that plays in
+    the saved ``match``, else None."""
+    account = _account(actor)
+    if account is None or match.pk is None:
+        return None
+    player: Player | None = Player.objects.filter(
+        account=account, match_participations__match_id=match.pk
+    ).first()
+    return player
+
+
+def can_confirm_as_organizer(actor: Actor, match: Match) -> bool:
+    """True when ``actor`` has event authority over the stored match's Event.
+
+    That is a member (either role) of the Event's Organizer while it is
+    verified, or an approved application that Organizer owns. A match with
+    no Event has no organizer to confirm it.
+    """
+    if match.pk is None:
+        return False
+    event_id: int | None = (
+        Match.objects.filter(pk=match.pk).values_list("event_id", flat=True).first()
+    )
+    if event_id is None:
+        return False
+    account = _account(actor)
+    if account is not None:
+        return _account_event_authority(account, event_id)
+    application = _application(actor)
+    if application is not None:
+        return _application_event_authority(application, event_id)
+    return False
+
+
+def is_moderator(actor: Actor) -> bool:
+    """True when ``actor`` is an active Account with ``matches.moderate_match``.
+
+    The Account is loaded again, so neither a stale ``is_active`` nor a
+    cached permission set on the instance counts.
+    """
+    account = _account(actor)
+    if account is None:
+        return False
+    fresh = type(account).objects.get(pk=account.pk)
+    return fresh.has_perm(MODERATE_PERMISSION)
