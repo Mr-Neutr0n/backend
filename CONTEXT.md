@@ -36,14 +36,14 @@ _Avoid_: gender, sex.
 A person or body that runs events and submits results on behalf of an event, Club, league, or tournament. An Organizer is unverified until an Account with permission to verify organizers verifies it. A verified Organizer's submission counts as confirmed. A person who organizes alone is an Organizer with one Organizer Member. Backend: `clubs.Organizer`.
 
 **Organizer Member**:
-An Account that acts for an Organizer, with a role: admin or match manager. While an Organizer is verified, the Account that verified it cannot be its member. Backend: `clubs.OrganizerMember`.
+An Account that acts for an Organizer, with a role: admin or match manager. While the Organizer is verified, a member with either role may submit matches for its Events (a match that also names a Club needs a Club Role there too) and change them. While an Organizer is verified, the Account that verified it cannot be its member. Backend: `clubs.OrganizerMember`.
 
 **Club**:
 A place or group where players play, with a name and an optional city and region. Backend: `clubs.Club`.
 _Avoid_: venue, team.
 
 **Club Role**:
-An Account's role at a Club: admin or match manager. #79 sets what each role may do. Backend: `clubs.ClubRole`.
+An Account's role at a Club: admin or match manager. Either role may submit the Club's matches (a match that also names an Event needs authority for that Event too). Of the Club Roles, only admin may change them. Backend: `clubs.ClubRole`.
 
 **Event**:
 A tournament, league, or verified rec play that an Organizer runs, optionally at a Club, from a start date to an end date. Its kind is the Match Type its matches count as: `tournament`, `league`, or `rec_verified`. Self-reported matches have no Event. An Event also stores a per-event weight from 0.01 to 1.00, which is not applied to ratings. Backend: `events.Event`.
@@ -54,11 +54,11 @@ An app, league platform, club, or tournament that integrates with OPEN through t
 _Avoid_: customer, client, vendor.
 
 **Partner Application**:
-What a Partner registers to reach OPEN's APIs through OAuth. It starts unapproved; a moderator approves production access (#29). It may belong to an Organizer (#79 decides what that allows). Backend: `partners.PartnerApplication`.
+What a Partner registers to reach OPEN's APIs through OAuth. It starts unapproved; a moderator approves production access (#29). It may belong to an Organizer. Once approved, it may submit matches for the Events of the verified Organizer it belongs to and for each Club that granted it. A match that names both an Event and a Club needs both. It never submits a match with no Event and no Club, and it may change only the matches it submitted. Backend: `partners.PartnerApplication`.
 _Avoid_: client, app (alone), integration.
 
 **Club Application Grant**:
-A Club's permission for one Partner Application to submit that Club's matches (#79). Backend: `partners.ClubApplicationGrant`.
+A Club's permission for one Partner Application to submit that Club's matches, once the application is approved. Backend: `partners.ClubApplicationGrant`.
 _Avoid_: authorization, consent (that is a player's approval of a linked app, #76).
 
 **External ID**:
@@ -84,10 +84,10 @@ How each game is scored: side-out or rally scoring, points to win, win-by margin
 Where the result came from, which affects its weight: `tournament`, `league`, `rec_verified`, or `self_reported`. Engine: `MatchType`.
 
 **Confirmation**:
-Agreement that a reported score is correct. A self-reported Match needs at least one player from each team to confirm it, unless a verified Organizer submitted it. Engine: `Match.confirmed_by`.
+Agreement that a reported score is correct. A self-reported Match needs at least one player from each team to confirm it. Engine: `Match.confirmed_by`.
 
 **Submission**:
-A request to add a Match through the Results API. A Submission becomes a Match in the Ledger only after it passes validation, duplicate checks, and Confirmation.
+A request to add a Match through the Results API. A Submission becomes a Match in the Ledger only after it passes the submitter's permission check, validation, duplicate checks, and Confirmation.
 _Avoid_: upload (an upload is a batch of Submissions).
 
 **Flagged Match**:
