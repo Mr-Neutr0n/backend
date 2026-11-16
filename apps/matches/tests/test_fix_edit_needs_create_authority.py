@@ -35,8 +35,7 @@ BAD_GAMES = ((11, 10),)
 
 def _edit(match: Match, actor: Any, games: tuple[tuple[int, int], ...]) -> Match:
     teams = {
-        team: [p.player for p in match.participants.filter(team=team)]
-        for team in Team
+        team: [p.player for p in match.participants.filter(team=team)] for team in Team
     }
     return edit_match(
         match,
