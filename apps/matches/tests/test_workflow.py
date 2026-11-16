@@ -48,7 +48,10 @@ from apps.matches.workflow import (
     resolve_dispute,
     void_match,
 )
-from apps.partners.tests.factories import approved_application
+from apps.partners.tests.factories import (
+    ClubApplicationGrantFactory,
+    approved_application,
+)
 from apps.players.models import Player
 
 pytestmark = pytest.mark.django_db
@@ -513,10 +516,12 @@ def test_an_edit_that_duplicates_another_match_rolls_back(
 
 def test_an_edit_keeps_the_application_and_external_id(signals: SignalLog) -> None:
     application = approved_application()
-    match: Match = MatchFactory.create(by_application=True)
-    raw_update(
-        match, submitted_by_application=application, status=MatchStatus.CONFIRMED
+    club = ClubFactory.create()
+    ClubApplicationGrantFactory.create(club=club, application=application)
+    match: Match = MatchFactory.create(
+        by_application=True, submitted_by_application=application, club=club
     )
+    raw_update(match, status=MatchStatus.CONFIRMED)
 
     corrected = _edit(match, application, games=((11, 3),))
 
