@@ -4,7 +4,7 @@ This is a security-sensitive area (CLAUDE.md, hard rule 8): these rules
 decide who may put a match in the ledger and who may change one.
 
 An actor is an Account or a Partner Application. An Account counts only
-when it is authenticated and active. An application counts only when it
+when it is saved and active. An application counts only when it
 is approved. Sandbox status (#74) and scopes (#28) are not checked here.
 Anything else (an anonymous user, another type) is refused.
 
@@ -38,9 +38,9 @@ change service from #40's admin, not through this function.
 No rule reads payment status or paid entitlements, and no function takes
 such input (hard rule 7).
 
-Each rule reads roles, grants, and verification from the database by id,
-never from an in-memory instance, so a stale instance cannot pass. The
-reads take no row locks: a role removed while a submission is in flight
+Each rule reads roles, grants, verification, approval, and an Account's
+``is_active`` from the database by id, never from an in-memory instance,
+so a stale instance cannot pass. An unsaved actor is refused. The reads take no row locks: a role removed while a submission is in flight
 can let that one submission through. Locking role rows would serialize
 unrelated submissions, so this is accepted.
 """
@@ -90,10 +90,13 @@ class MatchPermissionDenied(PermissionError):
 
 
 def _account(actor: object) -> "_User | None":
-    """The actor as an active, authenticated Account, else None."""
-    if not isinstance(actor, get_user_model()):
+    """The actor as a saved, active Account, else None.
+
+    ``is_active`` is read from the database, not from the instance.
+    """
+    if not isinstance(actor, get_user_model()) or actor.pk is None:
         return None
-    if not (actor.is_authenticated and actor.is_active):
+    if not type(actor).objects.filter(pk=actor.pk, is_active=True).exists():
         return None
     return actor
 
