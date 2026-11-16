@@ -274,6 +274,10 @@ class GameQuerySet(LedgerQuerySet["Game"]):
     """Games, with the ledger guard."""
 
 
+class MatchConfirmationQuerySet(LedgerQuerySet["MatchConfirmation"]):
+    """Match Confirmations, with the ledger guard."""
+
+
 class MatchFormat(models.TextChoices):
     """Singles or doubles.
 
@@ -440,6 +444,15 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
             "set by record_match()"
         ),
     )
+    corrects = models.OneToOneField(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="corrected_by",
+        error_messages=_MATCH_MESSAGES,
+        help_text="The voided match this match corrects, set only by edit_match()",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = MatchQuerySet.as_manager()
@@ -449,6 +462,7 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
         # Django's internal queries use the base manager, so it must be the
         # guarded one too.
         base_manager_name = "objects"
+        permissions = (("moderate_match", "Can void matches and resolve disputes"),)
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.CheckConstraint(
                 condition=(
@@ -508,9 +522,12 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
                 ),
                 name="matches_match_external_id_trimmed",
             ),
+            # A corrected match keeps its application's external id, so only
+            # matches that are not voided must differ. record_match() still
+            # refuses an external id used by a match in any status.
             models.UniqueConstraint(
                 fields=("submitted_by_application", "external_id"),
-                condition=~Q(external_id=""),
+                condition=~Q(external_id="") & ~Q(status=MatchStatus.VOIDED),
                 name="matches_match_external_id_unique_per_application",
                 violation_error_message=_EXTERNAL_ID_TAKEN,
             ),
@@ -657,6 +674,60 @@ class Game(_LinkMessagesModel, _InsertOnlyModel):
 
     def __str__(self) -> str:
         return f"{self.match.public_code} game {self.game_number}"
+
+
+class ConfirmationDecision(models.TextChoices):
+    """What a participant said about a Match."""
+
+    CONFIRM = "confirm", "Confirm"
+    DISPUTE = "dispute", "Dispute"
+
+
+class MatchConfirmation(_LinkMessagesModel, _InsertOnlyModel):
+    """One participant's confirmation or dispute of a Match (#26).
+
+    See CONTEXT.md, Confirmation. A Player confirms a Match at most once and
+    disputes it at most once. Only the workflow services in
+    ``apps.matches.workflow`` write these rows. Like the other ledger rows,
+    a row is inserted once and never changed or deleted.
+    """
+
+    match = models.ForeignKey(
+        Match,
+        on_delete=models.PROTECT,
+        related_name="confirmations",
+        error_messages=_MATCH_MESSAGES,
+    )
+    player = models.ForeignKey(
+        "players.Player",
+        on_delete=models.PROTECT,
+        related_name="match_confirmations",
+        error_messages=_PLAYER_MESSAGES,
+    )
+    decision = models.CharField(
+        max_length=10, choices=ConfirmationDecision, error_messages=CHOICE_MESSAGES
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = MatchConfirmationQuerySet.as_manager()
+
+    class Meta:
+        base_manager_name = "objects"
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(
+                condition=Q(decision__in=ConfirmationDecision.values),
+                name="matches_matchconfirmation_decision_valid",
+            ),
+            models.UniqueConstraint(
+                fields=("match", "player", "decision"),
+                name="matches_matchconfirmation_once_per_decision",
+                violation_error_message="This player already gave this decision.",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        # The match code and decision, never the Player's name.
+        return f"{self.match.public_code} {self.decision}"
 
 
 class FlagReason(models.TextChoices):

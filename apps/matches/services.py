@@ -625,14 +625,19 @@ def _advisory_lock(key: int) -> None:
 def _external_id_match(
     application: "PartnerApplication", external_id: str
 ) -> Match | None:
-    # Any status: a voided Match keeps its external id.
-    return (
-        Match.objects.filter(
-            submitted_by_application=application, external_id=external_id
-        )
-        .order_by("created_at", "pk")
-        .first()
+    """The application's Match with this external id, in any status.
+
+    A voided Match keeps its external id, and its correction (#26) reuses
+    it, so the Match that is not voided comes first, else the latest
+    voided one.
+    """
+    matches = Match.objects.filter(
+        submitted_by_application=application, external_id=external_id
     )
+    live = matches.exclude(status=MatchStatus.VOIDED).first()
+    if live is not None:
+        return live
+    return matches.order_by("-created_at", "-pk").first()
 
 
 def _exact_match(fingerprint: str) -> Match | None:
