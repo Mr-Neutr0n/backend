@@ -253,7 +253,7 @@ def confirm_match(match: Match, *, actor: Actor) -> Match:
         return locked
 
 
-def dispute_match(match: Match, *, actor: Actor, reason: str = "") -> Match:
+def dispute_match(match: Match, *, actor: Actor) -> Match:
     """Record a participant's dispute of ``match`` and return the match.
 
     A pending or confirmed match becomes disputed, with one
@@ -262,7 +262,9 @@ def dispute_match(match: Match, *, actor: Actor, reason: str = "") -> Match:
     the participant's dispute row. A participant disputes a match at most
     once: a repeat (also after a moderator resolved the dispute as
     confirmed) does nothing. A voided match raises ``MatchStateError``.
-    Only a participant may dispute.
+    Only a participant may dispute. A dispute takes no reason: Audit
+    Events are append-only, and a participant's free text could hold a
+    name.
     """
     _saved(match)
     player = participant_player(actor, match)
@@ -284,7 +286,6 @@ def dispute_match(match: Match, *, actor: Actor, reason: str = "") -> Match:
             target=locked,
             before=before,
             after=snapshot(locked, ["status"]),
-            reason=reason,
             **audit_actor(actor),
         )
         if was_counting:
@@ -331,8 +332,17 @@ def resolve_dispute(match: Match, *, actor: Actor, outcome: str, reason: str) ->
         return locked
 
 
-def _may_change(actor: Actor, match: Match) -> bool:
-    return is_moderator(actor) or can_change_match(actor, match)
+_REASON_REFUSED = "Only a moderator may give a reason."
+
+
+def _check_reason(moderator: bool, reason: str) -> None:
+    """Refuse a non-moderator's reason with fixed text.
+
+    Audit Events are append-only, so free text that could hold a name is
+    stored only from moderators.
+    """
+    if not moderator and reason.strip():
+        raise ValueError(_REASON_REFUSED)
 
 
 def _void(
@@ -364,12 +374,15 @@ def void_match(match: Match, *, actor: Actor, reason: str = "") -> Match:
     """Void ``match``. For a moderator or an actor ``can_change_match`` allows.
 
     Any status but voided becomes voided, with one ``match.void`` Audit
-    Event. A match that was counting sends ``match_changed`` with
+    Event. Only a moderator may give a ``reason``; anyone else giving one
+    gets ``ValueError``. A match that was counting sends ``match_changed`` with
     ``change=void``, and each match it no longer holds gets ``release``.
     """
     _saved(match)
-    if not _may_change(actor, match):
+    moderator = is_moderator(actor)
+    if not (moderator or can_change_match(actor, match)):
         raise MatchActionDenied
+    _check_reason(moderator, reason)
     with transaction.atomic():
         locked = _lock(match)
         if locked.status == MatchStatus.VOIDED:
@@ -410,7 +423,8 @@ def edit_match(
     goes through validation, the model rules, and the duplicate checks
     (``MatchValidationError``, ``DuplicateMatchError``), and any error
     rolls everything back. One ``match.edit`` Audit Event on the old match
-    records it (no separate ``match.void``). Signals: ``match_changed``
+    records it (no separate ``match.void``). Only a moderator may give a
+    ``reason``; anyone else giving one gets ``ValueError``. Signals: ``match_changed``
     with ``change=edit`` for an old match that was counting (the earlier
     of the two dates), else ``match_confirmed`` for a confirmed
     correction, and ``hold`` or ``release`` for each other match whose
@@ -437,6 +451,7 @@ def edit_match(
         )
         if not can_create_match(actor, submission):
             raise MatchActionDenied
+    _check_reason(moderator, reason)
     draft = draft_match(
         format=format,
         team_a=team_a,
