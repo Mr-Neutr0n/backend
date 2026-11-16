@@ -347,7 +347,6 @@ def test_duplicate_hides_the_code_from_an_unrelated_application(
 
 
 def test_exact_duplicate_with_teams_swapped_and_players_reordered_is_refused(
-    user: User,
     application: PartnerApplication,
     team_a: list[Player],
     team_b: list[Player],

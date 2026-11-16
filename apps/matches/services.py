@@ -776,11 +776,13 @@ def record_match(
     saved with one ``possible_duplicate`` flag per earlier Match. The new
     Match has the model's default status (#26 owns confirmation).
 
-    Call it once per transaction. Its advisory locks last until the
-    outermost transaction ends, so two callers that each record several
-    matches inside one outer ``transaction.atomic()``, in different
-    orders, can deadlock. A batch that must be atomic should sort its
-    submissions by lineup lock key (``_lineup_lock_key``) first.
+    Call it in its own transaction, never several times inside one outer
+    ``transaction.atomic()``. Its advisory locks (an external id lock, then
+    a lineup lock) last until the outermost transaction ends, so two
+    callers that each record several matches in one outer transaction can
+    deadlock, whatever order they sort them in. A batch path (#71, #72)
+    records each match in its own transaction and reports a result per
+    match.
     """
     keys_a = _player_keys(team_a)
     keys_b = _player_keys(team_b)
