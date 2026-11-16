@@ -10,7 +10,6 @@ from datetime import date
 from typing import Any
 
 import pytest
-from django.contrib.auth.models import Permission
 
 from apps.accounts.models import User
 from apps.accounts.tests.factories import UserFactory
@@ -20,10 +19,8 @@ from apps.clubs.tests.factories import (
     ClubFactory,
     ClubRoleFactory,
     OrganizerMemberFactory,
-    verified_organizer,
 )
 from apps.events.models import Event
-from apps.events.tests.factories import EventFactory
 from apps.matches.models import (
     ConfirmationDecision,
     FlagReason,
@@ -53,7 +50,6 @@ from apps.matches.workflow import (
 )
 from apps.partners.tests.factories import approved_application
 from apps.players.models import Player
-from apps.players.tests.factories import PlayerFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -61,47 +57,6 @@ PLAYED_ON = date(2026, 6, 1)
 GAMES = ((11, 7), (9, 11), (11, 4))
 OTHER_GAMES = ((11, 5), (11, 8))
 REASON = "Made-up reason for a test."
-
-
-@pytest.fixture
-def players() -> list[Player]:
-    return [PlayerFactory.create() for _ in range(4)]
-
-
-@pytest.fixture
-def pending(players: list[Player]) -> Match:
-    """A doubles self-submission: players 0 and 1 against 2 and 3."""
-    return record_match(
-        format=MatchFormat.DOUBLES,
-        team_a=players[:2],
-        team_b=players[2:],
-        games=GAMES,
-        played_on=PLAYED_ON,
-        submitted_by_user=players[0].account,
-    ).match
-
-
-@pytest.fixture
-def confirmed(pending: Match, players: list[Player]) -> Match:
-    confirm_match(pending, actor=players[0].account)
-    return confirm_match(pending, actor=players[2].account)
-
-
-@pytest.fixture
-def moderator() -> User:
-    account: User = UserFactory.create()
-    account.user_permissions.add(
-        Permission.objects.get(
-            content_type__app_label="matches", codename="moderate_match"
-        )
-    )
-    return account
-
-
-@pytest.fixture
-def event() -> Event:
-    made: Event = EventFactory.create(organizer=verified_organizer())
-    return made
 
 
 def _member(event: Event, role: str = MemberRole.MATCH_MANAGER) -> User:
