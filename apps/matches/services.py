@@ -70,6 +70,7 @@ from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypeGuard
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
@@ -912,15 +913,22 @@ def exact_duplicate(draft: MatchDraft) -> Match | None:
     return _exact_match(draft.match.fingerprint)
 
 
-def duplicate_error(draft: MatchDraft, existing: Match) -> DuplicateMatchError:
-    """The error for an exact duplicate, naming the code only if visible."""
-    match = draft.match
-    return DuplicateMatchError(
-        DuplicateKind.DUPLICATE_MATCH,
-        _visible_code(
-            existing, match.submitted_by_user, match.submitted_by_application
-        ),
-    )
+def duplicate_error(
+    existing: Match, viewer: "Actor | None", *, reveal: bool = False
+) -> DuplicateMatchError:
+    """The error for an exact duplicate of ``existing``.
+
+    It names the code when ``viewer`` (the Account or application that
+    acted: the submitter, or an edit's editor) may know it, by
+    ``_visible_code``'s rules, or when ``reveal`` is set (a moderator).
+    """
+    if reveal:
+        code: str | None = existing.public_code
+    else:
+        user = viewer if isinstance(viewer, get_user_model()) else None
+        application = viewer if isinstance(viewer, get_application_model()) else None
+        code = _visible_code(existing, user, application)
+    return DuplicateMatchError(DuplicateKind.DUPLICATE_MATCH, code)
 
 
 def insert_draft(
@@ -1098,7 +1106,7 @@ def record_match(
                 confirmed = _confirm_pending_duplicate(existing, submitter)
                 if confirmed is not None:
                     return RecordedMatch(match=confirmed, created=False)
-            raise duplicate_error(draft, existing)
+            raise duplicate_error(existing, submitter)
 
         status = MatchStatus.CONFIRMED if confirms else MatchStatus.PENDING
         match, held = insert_draft(draft, status=status)

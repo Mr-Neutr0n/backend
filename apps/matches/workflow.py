@@ -452,7 +452,7 @@ def edit_match(
         check_external_id(draft, replaces=locked)
         existing = exact_duplicate(draft)
         if existing is not None:
-            raise duplicate_error(draft, existing)
+            raise duplicate_error(existing, actor, reveal=moderator)
         new_status = (
             MatchStatus.PENDING
             if old_status == MatchStatus.PENDING
