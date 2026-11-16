@@ -21,7 +21,8 @@ local date, external IDs unique per Partner Application, at most
 fingerprint. Score validation (win by 2, team size per format, games that
 decide the match) is ``apps.matches.services.validate_match``, duplicate
 detection is ``apps.matches.services.record_match``, and confirmation and
-status changes are #26. A possible duplicate is held for review as a
+status changes are ``apps.matches.workflow``. Which matches count is
+``MatchQuerySet.counted``. A possible duplicate is held for review as a
 ``MatchFlag``, so reviewing it (#40) writes a flag row, never the Match.
 
 ``ScoringType`` values equal ``open_engine.ScoringType``'s and
@@ -313,7 +314,11 @@ class MatchFormat(models.TextChoices):
 
 
 class MatchStatus(models.TextChoices):
-    """Where a Match is in confirmation. #26 owns the changes between them."""
+    """Where a Match is in confirmation.
+
+    Only ``record_match`` (the initial status) and the services in
+    ``apps.matches.workflow`` set it.
+    """
 
     PENDING = "pending", "Pending"
     CONFIRMED = "confirmed", "Confirmed"
@@ -778,11 +783,11 @@ class MatchFlag(_LinkMessagesModel):
 
     An open ``possible_duplicate`` flag holds both its ``match`` and its
     ``duplicate_of`` from counting until a moderator resolves it (#40),
-    whatever the new Match's status or submitter. #26 and #44 must count
-    neither, unless they refine the hold (ADR 0011). #40 adds the review
-    actions and any resolution fields. For #26: a permitted submitter's
-    exact duplicate of a pending Match should confirm that Match, not be
-    refused.
+    whatever the new Match's status or submitter (ADR 0011). The one
+    refinement (``MatchQuerySet.counted``): a voided match, expired or
+    corrected, no longer holds the other one. #44 must count only
+    ``counted()`` matches. #40 adds the review actions and any resolution
+    fields.
     """
 
     match = models.ForeignKey(
