@@ -800,8 +800,11 @@ def record_match(
         near = _near_matches(keys_a, keys_b, validated.played_on)
 
         _save_new(match)
-        for row in (*participants, *game_rows):
-            row.match = match
+        # Set the links again now that the Match has its primary key.
+        for participant in participants:
+            participant.match = match
+        for game in game_rows:
+            game.match = match
         MatchParticipant.objects.bulk_create(participants)
         Game.objects.bulk_create(game_rows)
         MatchFlag.objects.bulk_create(
