@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 from django.contrib.auth.models import Permission
-from django.db import connection
 
 from apps.accounts.models import User
 from apps.accounts.tests.factories import UserFactory
@@ -26,14 +25,14 @@ from apps.players.tests.factories import PlayerFactory
 class SignalLog:
     """What the workflow signals were sent with.
 
-    ``confirmed`` holds each ``match_confirmed`` Match's pk, ``changed``
-    each ``match_changed`` as (pk, change, earliest_date), and
-    ``in_atomic`` whether every signal was sent inside a transaction.
+    ``confirmed`` holds each ``match_confirmed`` Match's pk, and
+    ``changed`` each ``match_changed`` as (pk, change, earliest_date).
+    That signals are sent inside the transaction is tested by a receiver
+    that raises (``test_fix_receiver_rollback.py``).
     """
 
     confirmed: list[int] = field(default_factory=list)
     changed: list[tuple[int, MatchChange, object]] = field(default_factory=list)
-    in_atomic: list[bool] = field(default_factory=list)
 
     def changes(self, match: Match) -> list[MatchChange]:
         return [change for pk, change, _date in self.changed if pk == match.pk]
@@ -45,7 +44,6 @@ def signals() -> Iterator[SignalLog]:
 
     def on_confirmed(sender: type[Match], match: Match, **kwargs: Any) -> None:
         log.confirmed.append(match.pk)
-        log.in_atomic.append(connection.in_atomic_block)
 
     def on_changed(
         sender: type[Match],
@@ -55,7 +53,6 @@ def signals() -> Iterator[SignalLog]:
         **kwargs: Any,
     ) -> None:
         log.changed.append((match.pk, change, earliest_date))
-        log.in_atomic.append(connection.in_atomic_block)
 
     match_confirmed.connect(on_confirmed, weak=False)
     match_changed.connect(on_changed, weak=False)

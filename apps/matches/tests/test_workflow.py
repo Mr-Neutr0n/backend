@@ -111,7 +111,6 @@ def test_both_teams_confirming_confirms_the_match(
     assert audit.before == {"status": MatchStatus.PENDING}
     assert audit.after == {"status": MatchStatus.CONFIRMED}
     assert signals.confirmed == [pending.pk]
-    assert all(signals.in_atomic)
 
 
 def test_a_repeated_confirm_does_nothing(

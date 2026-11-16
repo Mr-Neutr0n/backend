@@ -123,7 +123,6 @@ def test_a_club_submission_is_created_confirmed(
     assert event.after == {"status": MatchStatus.CONFIRMED}
     assert AuditEvent.objects.count() == 1 + _verification_events()
     assert signals.confirmed == [match.pk]
-    assert all(signals.in_atomic)
 
 
 def _verification_events() -> int:
