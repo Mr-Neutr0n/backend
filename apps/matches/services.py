@@ -11,10 +11,10 @@ CLAUDE.md hard rule 8). In one transaction, under advisory locks, it:
 
 - refuses an external id the same Partner Application already used, for a
   Match in any status (``DuplicateKind.DUPLICATE_EXTERNAL_ID``);
-- refuses an exact duplicate: a counted (not voided) Match with the same
+- refuses an exact duplicate: a Match that is not voided, with the same
   fingerprint, that is the same two teams in either order, the same date
   played, and the same game scores (``DuplicateKind.DUPLICATE_MATCH``);
-- saves a near duplicate (a counted Match with the same two teams and date
+- saves a near duplicate (a Match that is not voided, with the same two teams and date
   but other scores) and flags it with one ``MatchFlag`` per earlier Match.
 
 A refusal raises ``DuplicateMatchError`` naming the earlier Match's OPEN
@@ -520,7 +520,7 @@ def _external_id_lock_key(application_id: int, external_id: str) -> int:
     )
 
 
-_FINGERPRINT_CONSTRAINT = "matches_match_fingerprint_unique_while_counted"
+_FINGERPRINT_CONSTRAINT = "matches_match_fingerprint_unique_unless_voided"
 _EXTERNAL_ID_CONSTRAINT = "matches_match_external_id_unique_per_application"
 
 
@@ -599,7 +599,7 @@ def _exact_match(fingerprint: str) -> Match | None:
 def _near_matches(
     team_a: Sequence[int], team_b: Sequence[int], played_on: date
 ) -> list[Match]:
-    """Counted Matches with the same two teams and date, in any order.
+    """Matches that are not voided, with the same two teams and date, in any order.
 
     Step ``_exact_match`` already ruled out equal fingerprints, so these
     differ in scores, or have no fingerprint (a row made outside

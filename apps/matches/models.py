@@ -16,7 +16,7 @@ guard.
 These models enforce only what a database constraint can: the allowed
 values of each choice, one submitter, a ``played_at`` that agrees with its
 local date, external IDs unique per Partner Application, at most
-``MAX_GAMES`` games, no negative scores, and one counted Match per
+``MAX_GAMES`` games, no negative scores, and one Match that is not voided per
 fingerprint. Score validation (win by 2, team size per format, games that
 decide the match) is ``apps.matches.services.validate_match``, duplicate
 detection is ``apps.matches.services.record_match``, and confirmation and
@@ -411,7 +411,7 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
             models.UniqueConstraint(
                 fields=("fingerprint",),
                 condition=~Q(fingerprint="") & ~Q(status=MatchStatus.VOIDED),
-                name="matches_match_fingerprint_unique_while_counted",
+                name="matches_match_fingerprint_unique_unless_voided",
                 violation_error_message="This match was already submitted.",
             ),
         ]
@@ -533,7 +533,7 @@ class MatchFlag(_LinkMessagesModel):
     """A reason to hold a Match for Organizer review (CONTEXT.md, Flagged Match).
 
     ``record_match()`` creates a ``possible_duplicate`` flag for each
-    earlier counted Match with the same teams and date but other scores,
+    earlier Match that is not voided with the same teams and date but other scores,
     with ``duplicate_of`` set to it. A flag is a row of its own, so
     reviewing one never edits the Match in the ledger.
 
