@@ -138,7 +138,7 @@ def _record(
     else:
         values["submitted_by_application"] = submitter
     values.update(overrides)
-    return record_match(**values)
+    return record_match(**values).match
 
 
 def _counts() -> tuple[int, int, int, int]:
@@ -159,7 +159,8 @@ def test_records_match_with_participants_games_and_defaults(
     match = _record(team_a, team_b, submitter=user)
 
     match.refresh_from_db()
-    assert match.status == MatchStatus.PENDING
+    # A Club submission is created confirmed (#26, decision F4).
+    assert match.status == MatchStatus.CONFIRMED
     assert match.format == MatchFormat.DOUBLES
     assert match.played_on == PLAYED_ON
     assert match.game_target == GameTarget.ELEVEN

@@ -68,12 +68,15 @@ from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
+from oauth2_provider.models import get_application_model
 
+from apps.audit.models import AuditAction
+from apps.audit.services import record_event, snapshot
 from apps.matches.models import (
     MAX_GAMES,
     MAX_UTC_OFFSET_MINUTES,
@@ -89,7 +92,8 @@ from apps.matches.models import (
     ScoringType,
     Team,
 )
-from apps.matches.permissions import MatchSubmission, check_can_create_match
+from apps.matches.permissions import Actor, MatchSubmission, check_can_create_match
+from apps.matches.signals import MatchChange, match_changed, match_confirmed
 from apps.players.models import Player
 
 if TYPE_CHECKING:
@@ -757,7 +761,35 @@ def _save_new(match: Match) -> None:
         raise DuplicateMatchError(kind, code) from None
 
 
-def record_match(
+@dataclass(frozen=True)
+class RecordedMatch:
+    """What ``record_match`` did.
+
+    ``created`` is True for a new Match, and False when the submission
+    confirmed an existing pending Match it exactly duplicates (see
+    ``record_match``).
+    """
+
+    match: Match
+    created: bool
+
+
+@dataclass(frozen=True)
+class MatchDraft:
+    """A validated, cleaned Match with its participants and games, not saved.
+
+    Built by ``draft_match`` and written by ``insert_draft``, the creation
+    core that ``record_match`` and the workflow's ``edit_match`` share.
+    """
+
+    match: Match
+    participants: tuple[MatchParticipant, ...]
+    games: tuple[Game, ...]
+    keys_a: tuple[int, ...]
+    keys_b: tuple[int, ...]
+
+
+def draft_match(
     *,
     format: str,
     team_a: Sequence[Player],
@@ -778,41 +810,14 @@ def record_match(
     event_label: str = "",
     bracket_label: str = "",
     sequence: int = 0,
-) -> Match:
-    """Validate a submission, check it for duplicates, and add it to the ledger.
+) -> MatchDraft:
+    """Validate a match and run every model rule, with no lock or write.
 
-    Teams are saved Players. Raises ``MatchPermissionDenied`` when the
-    submitter may not submit this match (checked first, before any
-    validation, lookup, lock, or write), ``MatchValidationError`` for a
-    score or model rule, ``DuplicateMatchError`` for an exact duplicate or
-    a repeated external id, and writes nothing in any of these cases. Every
-    submitter given is checked. With no submitter there is nothing to
-    check, and with two permitted ones the model rules refuse the match as
-    a ``MatchValidationError``. A near duplicate is
-    saved with one ``possible_duplicate`` flag per earlier Match. The new
-    Match has the model's default status (#26 owns confirmation).
-
-    Call it in its own transaction, never several times inside one outer
-    ``transaction.atomic()``. Its advisory locks (an external id lock, then
-    a lineup lock) last until the outermost transaction ends, so two
-    callers that each record several matches in one outer transaction can
-    deadlock, whatever order they sort them in. A batch path (#71, #72) must
-    record each match in its own transaction and report a result per
-    match; #71's all-or-nothing mode must get its all-or-nothing result
-    another way.
+    Raises ``MatchValidationError`` for a score or model rule. Checks no
+    permission: each caller checks its own first.
     """
     keys_a = _player_keys(team_a)
     keys_b = _player_keys(team_b)
-    # Every submitter given is checked, so an unsaved second one cannot
-    # skip the check. Zero, or two permitted ones, fail the model's
-    # one-submitter rule in _clean_all, before anything is written.
-    submission = MatchSubmission(
-        event=event, club=club, player_ids=frozenset(keys_a + keys_b)
-    )
-    if submitted_by_user is not None:
-        check_can_create_match(submitted_by_user, submission)
-    if submitted_by_application is not None:
-        check_can_create_match(submitted_by_application, submission)
     validated = validate_match(
         format=format,
         team_a=team_a,
@@ -826,7 +831,6 @@ def record_match(
     fingerprint = match_fingerprint(
         keys_a, keys_b, validated.played_on, validated.games
     )
-
     match = Match(
         format=validated.format,
         played_on=validated.played_on,
@@ -856,47 +860,256 @@ def record_match(
         for number, (a, b) in enumerate(validated.games, start=1)
     ]
     # Every model rule runs before any lock, lookup, or write. Among other
-    # things this strips external_id, so the lookup below uses the stored
-    # form.
+    # things this strips external_id, so the lookups use the stored form.
     _clean_all(match, participants, game_rows)
+    return MatchDraft(
+        match=match,
+        participants=tuple(participants),
+        games=tuple(game_rows),
+        keys_a=tuple(keys_a),
+        keys_b=tuple(keys_b),
+    )
+
+
+def lock_draft(draft: MatchDraft) -> None:
+    """Take the draft's advisory locks: its external id's, then its lineup's.
+
+    Call inside a transaction. The locks last until the outermost
+    transaction ends. Take them before any row lock, as every creation
+    path does, so a row lock never waits behind an advisory lock in one
+    path and the other way round in another.
+    """
+    match = draft.match
+    application = match.submitted_by_application
+    if match.external_id and application is not None:
+        _advisory_lock(_external_id_lock_key(application.pk, match.external_id))
+    _advisory_lock(_lineup_lock_key(draft.keys_a, draft.keys_b, match.played_on))
+
+
+def check_external_id(draft: MatchDraft, *, replaces: Match | None = None) -> None:
+    """Refuse an external id its application already used, in any status.
+
+    ``replaces`` is the voided Match an edit corrects, whose external id
+    the correction keeps. Call after ``lock_draft``.
+    """
+    match = draft.match
+    application = match.submitted_by_application
+    if not match.external_id or application is None:
+        return
+    existing = _external_id_match(application, match.external_id)
+    if existing is not None and (replaces is None or existing.pk != replaces.pk):
+        # The same application submitted it, so the code is named.
+        raise DuplicateMatchError(
+            DuplicateKind.DUPLICATE_EXTERNAL_ID, existing.public_code
+        )
+
+
+def exact_duplicate(draft: MatchDraft) -> Match | None:
+    """The Match that is not voided with the draft's fingerprint, if any.
+
+    Call after ``lock_draft``.
+    """
+    return _exact_match(draft.match.fingerprint)
+
+
+def duplicate_error(draft: MatchDraft, existing: Match) -> DuplicateMatchError:
+    """The error for an exact duplicate, naming the code only if visible."""
+    match = draft.match
+    return DuplicateMatchError(
+        DuplicateKind.DUPLICATE_MATCH,
+        _visible_code(
+            existing, match.submitted_by_user, match.submitted_by_application
+        ),
+    )
+
+
+def insert_draft(
+    draft: MatchDraft, *, status: MatchStatus, corrects: Match | None = None
+) -> tuple[Match, list[Match]]:
+    """Write the draft's Match, participants, games, and flags.
+
+    Call after ``lock_draft`` and the duplicate checks, in the same
+    transaction. Returns the new Match and the earlier near duplicates that
+    were counting before it was written: each is now held by its flag.
+    """
+    match = draft.match
+    near = _near_matches(draft.keys_a, draft.keys_b, match.played_on)
+    was_counting = [earlier for earlier in near if earlier.is_counted()]
+    match.status = status
+    match.corrects = corrects
+    _save_new(match)
+    # Set the links again now that the Match has its primary key.
+    for participant in draft.participants:
+        participant.match = match
+    for game in draft.games:
+        game.match = match
+    MatchParticipant.objects.bulk_create(draft.participants)
+    Game.objects.bulk_create(draft.games)
+    MatchFlag.objects.bulk_create(
+        [
+            MatchFlag(
+                match=match,
+                reason=FlagReason.POSSIBLE_DUPLICATE,
+                duplicate_of=earlier,
+            )
+            for earlier in near
+        ]
+    )
+    return match, was_counting
+
+
+def audit_actor(actor: "Actor | None") -> dict[str, Any]:
+    """``record_event`` keyword arguments naming ``actor`` as who acted."""
+    if isinstance(actor, get_application_model()):
+        return {"actor_application": actor}
+    return {"actor": actor}
+
+
+def send_holds(held: Sequence[Match]) -> None:
+    """Send ``match_changed(change=hold)`` for each match now held."""
+    for earlier in held:
+        match_changed.send(
+            sender=Match,
+            match=earlier,
+            change=MatchChange.HOLD,
+            earliest_date=earlier.played_on,
+        )
+
+
+def _confirm_pending_duplicate(existing: Match, actor: "Actor") -> Match | None:
+    """Confirm ``existing`` if it is still pending, under a row lock.
+
+    Returns the confirmed Match, or None when it is no longer pending.
+    """
+    locked = Match.objects.select_for_update().get(pk=existing.pk)
+    if locked.status != MatchStatus.PENDING:
+        return None
+    before = snapshot(locked, ["status"])
+    locked.status = MatchStatus.CONFIRMED
+    locked.save(update_fields=["status"])
+    record_event(
+        action=AuditAction.MATCH_CONFIRM,
+        target=locked,
+        before=before,
+        after=snapshot(locked, ["status"]),
+        **audit_actor(actor),
+    )
+    match_confirmed.send(sender=Match, match=locked)
+    return locked
+
+
+def record_match(
+    *,
+    format: str,
+    team_a: Sequence[Player],
+    team_b: Sequence[Player],
+    games: Sequence[tuple[int, int]],
+    played_on: date,
+    best_of: int | None = None,
+    game_target: int | None = None,
+    scoring_type: str | None = None,
+    submitted_by_user: "_User | None" = None,
+    submitted_by_application: "PartnerApplication | None" = None,
+    external_id: str = "",
+    event: "Event | None" = None,
+    club: "Club | None" = None,
+    played_at: datetime | None = None,
+    played_at_utc_offset: int | None = None,
+    location: str = "",
+    event_label: str = "",
+    bracket_label: str = "",
+    sequence: int = 0,
+) -> RecordedMatch:
+    """Validate a submission, check it for duplicates, and add it to the ledger.
+
+    Teams are saved Players. Raises ``MatchPermissionDenied`` when the
+    submitter may not submit this match (checked first, before any
+    validation, lookup, lock, or write), ``MatchValidationError`` for a
+    score or model rule, ``DuplicateMatchError`` for an exact duplicate or
+    a repeated external id, and writes nothing in any of these cases. Every
+    submitter given is checked. With no submitter there is nothing to
+    check, and with two permitted ones the model rules refuse the match as
+    a ``MatchValidationError``. A near duplicate is
+    saved with one ``possible_duplicate`` flag per earlier Match.
+
+    A match with an Event or a Club comes from a permitted non-self
+    submitter (decision F4) and is created confirmed, with a
+    ``match.confirm`` Audit Event naming the submitter and one
+    ``match_confirmed`` signal. A self-submission (no Event, no Club,
+    decision F1) is created pending. Such a submitter's exact duplicate of
+    a pending Match confirms that Match the same way instead of raising,
+    and returns it with ``created=False``. An exact duplicate of a Match in
+    any other status, or from a self-submitter, still raises. Each earlier
+    match that was counting and is now held by a new flag gets
+    ``match_changed`` with ``change=hold``. Signals are sent inside the
+    transaction (``apps.matches.signals``).
+
+    Call it in its own transaction, never several times inside one outer
+    ``transaction.atomic()``. Its advisory locks (an external id lock, then
+    a lineup lock) last until the outermost transaction ends, so two
+    callers that each record several matches in one outer transaction can
+    deadlock, whatever order they sort them in. A batch path (#71, #72) must
+    record each match in its own transaction and report a result per
+    match; #71's all-or-nothing mode must get its all-or-nothing result
+    another way.
+    """
+    keys_a = _player_keys(team_a)
+    keys_b = _player_keys(team_b)
+    # Every submitter given is checked, so an unsaved second one cannot
+    # skip the check. Zero, or two permitted ones, fail the model's
+    # one-submitter rule in _clean_all, before anything is written.
+    submission = MatchSubmission(
+        event=event, club=club, player_ids=frozenset(keys_a + keys_b)
+    )
+    if submitted_by_user is not None:
+        check_can_create_match(submitted_by_user, submission)
+    if submitted_by_application is not None:
+        check_can_create_match(submitted_by_application, submission)
+    draft = draft_match(
+        format=format,
+        team_a=team_a,
+        team_b=team_b,
+        games=games,
+        played_on=played_on,
+        best_of=best_of,
+        game_target=game_target,
+        scoring_type=scoring_type,
+        submitted_by_user=submitted_by_user,
+        submitted_by_application=submitted_by_application,
+        external_id=external_id,
+        event=event,
+        club=club,
+        played_at=played_at,
+        played_at_utc_offset=played_at_utc_offset,
+        location=location,
+        event_label=event_label,
+        bracket_label=bracket_label,
+        sequence=sequence,
+    )
+    confirms = event is not None or club is not None
+    submitter: Actor | None = submitted_by_user or submitted_by_application
 
     with transaction.atomic():
-        if match.external_id and submitted_by_application is not None:
-            _advisory_lock(
-                _external_id_lock_key(submitted_by_application.pk, match.external_id)
-            )
-            existing = _external_id_match(submitted_by_application, match.external_id)
-            if existing is not None:
-                # The same application submitted it, so the code is named.
-                raise DuplicateMatchError(
-                    DuplicateKind.DUPLICATE_EXTERNAL_ID, existing.public_code
-                )
-
-        _advisory_lock(_lineup_lock_key(keys_a, keys_b, validated.played_on))
-        existing = _exact_match(fingerprint)
+        lock_draft(draft)
+        check_external_id(draft)
+        existing = exact_duplicate(draft)
         if existing is not None:
-            raise DuplicateMatchError(
-                DuplicateKind.DUPLICATE_MATCH,
-                _visible_code(existing, submitted_by_user, submitted_by_application),
-            )
-        near = _near_matches(keys_a, keys_b, validated.played_on)
+            if confirms and submitter is not None:
+                confirmed = _confirm_pending_duplicate(existing, submitter)
+                if confirmed is not None:
+                    return RecordedMatch(match=confirmed, created=False)
+            raise duplicate_error(draft, existing)
 
-        _save_new(match)
-        # Set the links again now that the Match has its primary key.
-        for participant in participants:
-            participant.match = match
-        for game in game_rows:
-            game.match = match
-        MatchParticipant.objects.bulk_create(participants)
-        Game.objects.bulk_create(game_rows)
-        MatchFlag.objects.bulk_create(
-            [
-                MatchFlag(
-                    match=match,
-                    reason=FlagReason.POSSIBLE_DUPLICATE,
-                    duplicate_of=earlier,
-                )
-                for earlier in near
-            ]
-        )
-    return match
+        status = MatchStatus.CONFIRMED if confirms else MatchStatus.PENDING
+        match, held = insert_draft(draft, status=status)
+        if confirms:
+            record_event(
+                action=AuditAction.MATCH_CONFIRM,
+                target=match,
+                before=None,
+                after=snapshot(match, ["status"]),
+                **audit_actor(submitter),
+            )
+            match_confirmed.send(sender=Match, match=match)
+        send_holds(held)
+    return RecordedMatch(match=match, created=True)

@@ -100,7 +100,7 @@ def _record(team_a: list[Player], team_b: list[Player], **overrides: Any) -> Mat
         "played_on": PLAYED_ON,
     }
     values.update(overrides)
-    return record_match(**values)
+    return record_match(**values).match
 
 
 def _counts() -> tuple[int, int, int, int]:
