@@ -2,7 +2,6 @@
 
 import pytest
 
-from apps.accounts.tests.factories import UserFactory
 from apps.matches.models import (
     BestOf,
     Game,
@@ -179,7 +178,8 @@ def test_factory_match_is_found_as_a_duplicate() -> None:
             team_b=team_b,
             games=games,
             played_on=match.played_on,
-            submitted_by_user=UserFactory.create(),
+            # A Player's own Account may submit its match (#79).
+            submitted_by_user=team_a[0].account,
         )
 
     assert error.value.kind == "duplicate_match"
