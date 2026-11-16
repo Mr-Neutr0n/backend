@@ -1,8 +1,9 @@
 """The error response schema shared by every API operation, and its handlers.
 
 Errors raised while an operation runs (input that fails validation, a body
-that does not parse, `Http404`, any `HttpError`, and
-`apps.matches.services.DuplicateMatchError`) come back as an
+that does not parse, `Http404`, any `HttpError`,
+`apps.matches.services.DuplicateMatchError`, and
+`apps.matches.permissions.MatchPermissionDenied`) come back as an
 `ErrorResponse`:
 
     {"code": "...", "message": "...", "errors": [{"field", "code", "message"}]}
@@ -23,6 +24,9 @@ names the earlier match's OPEN code only when `existing_code` is set: the
 submitter sent that match, or the submitting Account's Player played in
 it. A repeated external id always names it.
 
+A `MatchPermissionDenied` returns 403 with code "forbidden", fixed text,
+and no items. It never says which rule failed.
+
 These handlers do not see a wrong method on a known path (ninja answers with
 a plain-text 405) or a path that matches no operation (Django's 404 page).
 Unexpected exceptions keep ninja's default handler, which re-raises when
@@ -36,10 +40,12 @@ from django.http import Http404, HttpRequest, HttpResponse
 from ninja import NinjaAPI, Schema
 from ninja.errors import HttpError, ValidationError
 
+from apps.matches.permissions import MatchPermissionDenied
 from apps.matches.services import DuplicateKind, DuplicateMatchError
 
 VALIDATION_ERROR_STATUS = 422
 DUPLICATE_MATCH_STATUS = 409
+FORBIDDEN_STATUS = 403
 
 _DUPLICATE_FIELDS: Mapping[DuplicateKind, str] = {
     DuplicateKind.DUPLICATE_MATCH: "match",
@@ -149,3 +155,11 @@ def install_error_handlers(api: NinjaAPI) -> None:
             ],
         )
         return _respond(api, request, DUPLICATE_MATCH_STATUS, body)
+
+    @api.exception_handler(MatchPermissionDenied)
+    def on_match_permission_denied(
+        request: HttpRequest, exc: MatchPermissionDenied
+    ) -> HttpResponse:
+        # Fixed text only: never which rule failed.
+        body = ErrorResponse(code="forbidden", message=exc.message, errors=[])
+        return _respond(api, request, FORBIDDEN_STATUS, body)

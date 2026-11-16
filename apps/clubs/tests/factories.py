@@ -1,11 +1,15 @@
 """Factories for Clubs, Organizers, and their roles. Made-up data only."""
 
+from typing import Any
+
+from django.contrib.auth.models import Permission
 from factory.declarations import LazyFunction, SubFactory
 from factory.django import DjangoModelFactory
 from faker import Faker
 
 from apps.accounts.tests.factories import UserFactory
 from apps.clubs.models import Club, ClubRole, MemberRole, Organizer, OrganizerMember
+from apps.clubs.services import verify_organizer
 
 _faker = Faker()
 
@@ -55,3 +59,24 @@ class ClubRoleFactory(DjangoModelFactory[ClubRole]):
     club = SubFactory(ClubFactory)  # type: ignore[no-untyped-call]
     account = SubFactory(UserFactory)  # type: ignore[no-untyped-call]
     role = MemberRole.MATCH_MANAGER
+
+
+def verify(organizer: Organizer) -> Organizer:
+    """Verify ``organizer`` through ``verify_organizer``, the real path.
+
+    The verifier is a new Account with ``clubs.verify_organizer`` that is
+    not a member of the Organizer. Records one Audit Event.
+    """
+    verifier = UserFactory.create()
+    verifier.user_permissions.add(
+        Permission.objects.get(
+            content_type__app_label="clubs", codename="verify_organizer"
+        )
+    )
+    return verify_organizer(organizer, actor=verifier)
+
+
+def verified_organizer(**kwargs: Any) -> Organizer:
+    """A new Organizer, verified through the services."""
+    organizer: Organizer = OrganizerFactory.create(**kwargs)
+    return verify(organizer)

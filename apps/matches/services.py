@@ -6,7 +6,12 @@ tools, partner imports) calls ``record_match``, which calls
 reaches the ledger (CLAUDE.md, hard rule 3). ``validate_match`` takes plain
 values and does no database access.
 
-``record_match`` first runs every model rule on the Match, its
+Before anything else, ``record_match`` checks that the submitter may
+submit the match (``apps.matches.permissions``) and raises
+``MatchPermissionDenied`` if not. A refused submitter gets no validation
+detail and no duplicate error, so it cannot learn whether a match exists.
+
+After that check, ``record_match`` runs every model rule on the Match, its
 participants, and its games, so nothing invalid reaches a lock, a lookup,
 or the database. It then detects duplicates (a security-sensitive area,
 CLAUDE.md hard rule 8). In one transaction, under advisory locks, it:
@@ -84,6 +89,7 @@ from apps.matches.models import (
     ScoringType,
     Team,
 )
+from apps.matches.permissions import MatchSubmission, check_can_create_match
 from apps.players.models import Player
 
 if TYPE_CHECKING:
@@ -770,9 +776,14 @@ def record_match(
 ) -> Match:
     """Validate a submission, check it for duplicates, and add it to the ledger.
 
-    Teams are saved Players. Raises ``MatchValidationError`` for a score or
-    model rule, ``DuplicateMatchError`` for an exact duplicate or a repeated
-    external id, and writes nothing in either case. A near duplicate is
+    Teams are saved Players. Raises ``MatchPermissionDenied`` when the
+    submitter may not submit this match (checked first, before any
+    validation, lookup, lock, or write), ``MatchValidationError`` for a
+    score or model rule, ``DuplicateMatchError`` for an exact duplicate or
+    a repeated external id, and writes nothing in any of these cases. Every
+    submitter given is checked. With no submitter there is nothing to
+    check, and with two permitted ones the model rules refuse the match as
+    a ``MatchValidationError``. A near duplicate is
     saved with one ``possible_duplicate`` flag per earlier Match. The new
     Match has the model's default status (#26 owns confirmation).
 
@@ -787,6 +798,16 @@ def record_match(
     """
     keys_a = _player_keys(team_a)
     keys_b = _player_keys(team_b)
+    # Every submitter given is checked, so an unsaved second one cannot
+    # skip the check. Zero, or two permitted ones, fail the model's
+    # one-submitter rule in _clean_all, before anything is written.
+    submission = MatchSubmission(
+        event=event, club=club, player_ids=frozenset(keys_a + keys_b)
+    )
+    if submitted_by_user is not None:
+        check_can_create_match(submitted_by_user, submission)
+    if submitted_by_application is not None:
+        check_can_create_match(submitted_by_application, submission)
     validated = validate_match(
         format=format,
         team_a=team_a,

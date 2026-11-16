@@ -9,7 +9,10 @@ from typing import Any
 import pytest
 from django.db import IntegrityError, transaction
 
+from apps.accounts.models import User
 from apps.accounts.tests.factories import UserFactory
+from apps.clubs.models import Club
+from apps.clubs.tests.factories import ClubFactory, ClubRoleFactory
 from apps.matches import services
 from apps.matches.models import (
     Game,
@@ -21,7 +24,11 @@ from apps.matches.models import (
 )
 from apps.matches.services import DuplicateKind, DuplicateMatchError, record_match
 from apps.matches.tests.factories import MatchFactory
-from apps.partners.tests.factories import PartnerApplicationFactory
+from apps.partners.models import PartnerApplication
+from apps.partners.tests.factories import (
+    ClubApplicationGrantFactory,
+    approved_application,
+)
 from apps.players.models import Player
 from apps.players.tests.factories import PlayerFactory
 
@@ -110,17 +117,39 @@ def players() -> tuple[list[Player], list[Player]]:
     return [PlayerFactory.create()], [PlayerFactory.create()]
 
 
+@pytest.fixture
+def club() -> Club:
+    made: Club = ClubFactory.create()
+    return made
+
+
+def _club_account(club: Club) -> User:
+    """An Account with a Club Role at ``club``, so it may submit there (#79)."""
+    made: User = UserFactory.create()
+    ClubRoleFactory.create(club=club, account=made)
+    return made
+
+
+def _granted_application(club: Club) -> PartnerApplication:
+    """An approved application with ``club``'s grant (#79)."""
+    made = approved_application()
+    ClubApplicationGrantFactory.create(club=club, application=made)
+    return made
+
+
 def test_fingerprint_constraint_becomes_duplicate_match_error(
-    monkeypatch: pytest.MonkeyPatch, players: tuple[list[Player], list[Player]]
+    monkeypatch: pytest.MonkeyPatch,
+    players: tuple[list[Player], list[Player]],
+    club: Club,
 ) -> None:
     team_a, team_b = players
-    user = UserFactory.create()
-    first = _record(team_a, team_b, submitted_by_user=user)
+    user = _club_account(club)
+    first = _record(team_a, team_b, submitted_by_user=user, club=club)
     _miss_first_lookup(monkeypatch, "_exact_match")
     before = _counts()
 
     with pytest.raises(DuplicateMatchError) as error:
-        _record(team_a, team_b, submitted_by_user=user)
+        _record(team_a, team_b, submitted_by_user=user, club=club)
 
     assert error.value.kind == DuplicateKind.DUPLICATE_MATCH
     assert error.value.existing_code == first.public_code
@@ -128,26 +157,34 @@ def test_fingerprint_constraint_becomes_duplicate_match_error(
 
 
 def test_fingerprint_constraint_hides_the_code_from_an_unrelated_account(
-    monkeypatch: pytest.MonkeyPatch, players: tuple[list[Player], list[Player]]
+    monkeypatch: pytest.MonkeyPatch,
+    players: tuple[list[Player], list[Player]],
+    club: Club,
 ) -> None:
     team_a, team_b = players
-    _record(team_a, team_b, submitted_by_user=UserFactory.create())
+    _record(team_a, team_b, submitted_by_user=_club_account(club), club=club)
     _miss_first_lookup(monkeypatch, "_exact_match")
 
     with pytest.raises(DuplicateMatchError) as error:
-        _record(team_a, team_b, submitted_by_user=UserFactory.create())
+        _record(team_a, team_b, submitted_by_user=_club_account(club), club=club)
 
     assert error.value.kind == DuplicateKind.DUPLICATE_MATCH
     assert error.value.existing_code is None
 
 
 def test_external_id_constraint_becomes_duplicate_external_id_error(
-    monkeypatch: pytest.MonkeyPatch, players: tuple[list[Player], list[Player]]
+    monkeypatch: pytest.MonkeyPatch,
+    players: tuple[list[Player], list[Player]],
+    club: Club,
 ) -> None:
     team_a, team_b = players
-    application = PartnerApplicationFactory.create()
+    application = _granted_application(club)
     first = _record(
-        team_a, team_b, submitted_by_application=application, external_id="ext-1"
+        team_a,
+        team_b,
+        submitted_by_application=application,
+        external_id="ext-1",
+        club=club,
     )
     _miss_first_lookup(monkeypatch, "_external_id_match")
     before = _counts()
@@ -158,6 +195,7 @@ def test_external_id_constraint_becomes_duplicate_external_id_error(
             [PlayerFactory.create()],
             submitted_by_application=application,
             external_id="ext-1",
+            club=club,
         )
 
     assert error.value.kind == DuplicateKind.DUPLICATE_EXTERNAL_ID
@@ -166,13 +204,15 @@ def test_external_id_constraint_becomes_duplicate_external_id_error(
 
 
 def test_a_conflict_that_cannot_be_named_stays_an_integrity_error(
-    monkeypatch: pytest.MonkeyPatch, players: tuple[list[Player], list[Player]]
+    monkeypatch: pytest.MonkeyPatch,
+    players: tuple[list[Player], list[Player]],
+    club: Club,
 ) -> None:
     team_a, team_b = players
-    user = UserFactory.create()
-    _record(team_a, team_b, submitted_by_user=user)
+    user = _club_account(club)
+    _record(team_a, team_b, submitted_by_user=user, club=club)
     # Every lookup misses, so the conflicting Match cannot be named.
     monkeypatch.setattr(services, "_exact_match", lambda fingerprint: None)
 
     with pytest.raises(IntegrityError), transaction.atomic():
-        _record(team_a, team_b, submitted_by_user=user)
+        _record(team_a, team_b, submitted_by_user=user, club=club)

@@ -3,7 +3,7 @@
 An Organizer's verified status is security-sensitive (CLAUDE.md, hard rule
 8): change it only through ``apps.clubs.services``, which checks the actor
 and records an Audit Event. The permission rules that use the roles here
-are #79.
+are in ``apps.matches.permissions``.
 """
 
 import unicodedata

@@ -1,6 +1,9 @@
 """``record_match``: validation, then exact and near duplicate detection.
 
-Made-up players and accounts only.
+Every submitter here is permitted (#79): the Account fixtures hold a Club
+Role at one Club, the application is approved with that Club's grant, and
+``_record`` submits at that Club. A Player's own Account submits with no
+Club, as a self-submission. Made-up players and accounts only.
 """
 
 from collections.abc import Sequence
@@ -12,6 +15,8 @@ from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 
 from apps.accounts.models import User
 from apps.accounts.tests.factories import UserFactory
+from apps.clubs.models import Club, ClubRole
+from apps.clubs.tests.factories import ClubFactory, ClubRoleFactory
 from apps.matches.models import (
     BestOf,
     FlagReason,
@@ -34,8 +39,11 @@ from apps.matches.services import (
     match_fingerprint,
     record_match,
 )
-from apps.partners.models import PartnerApplication
-from apps.partners.tests.factories import PartnerApplicationFactory
+from apps.partners.models import ClubApplicationGrant, PartnerApplication
+from apps.partners.tests.factories import (
+    ClubApplicationGrantFactory,
+    approved_application,
+)
 from apps.players.models import Player
 from apps.players.tests.factories import PlayerFactory
 
@@ -55,21 +63,38 @@ def _players(count: int) -> list[Player]:
 
 
 @pytest.fixture
-def user() -> User:
+def club() -> Club:
+    made: Club = ClubFactory.create()
+    return made
+
+
+def _club_account(club: Club) -> User:
+    """An Account with a Club Role at ``club``, so it may submit there."""
     made: User = UserFactory.create()
+    ClubRoleFactory.create(club=club, account=made)
+    return made
+
+
+def _granted_application(club: Club) -> PartnerApplication:
+    """An approved application with ``club``'s grant."""
+    made = approved_application()
+    ClubApplicationGrantFactory.create(club=club, application=made)
     return made
 
 
 @pytest.fixture
-def other_user() -> User:
-    made: User = UserFactory.create()
-    return made
+def user(club: Club) -> User:
+    return _club_account(club)
 
 
 @pytest.fixture
-def application() -> PartnerApplication:
-    made: PartnerApplication = PartnerApplicationFactory.create()
-    return made
+def other_user(club: Club) -> User:
+    return _club_account(club)
+
+
+@pytest.fixture
+def application(club: Club) -> PartnerApplication:
+    return _granted_application(club)
 
 
 @pytest.fixture
@@ -80,6 +105,16 @@ def team_a() -> list[Player]:
 @pytest.fixture
 def team_b() -> list[Player]:
     return _players(2)
+
+
+def _permitted_club(submitter: User | PartnerApplication) -> Club | None:
+    """The Club where ``submitter`` may submit, or None for a Player's own
+    Account, which self-submits."""
+    if isinstance(submitter, User):
+        role = ClubRole.objects.filter(account=submitter).first()
+        return role.club if role else None
+    grant = ClubApplicationGrant.objects.filter(application=submitter).first()
+    return grant.club if grant else None
 
 
 def _record(
@@ -95,6 +130,7 @@ def _record(
         "team_b": team_b,
         "games": GAMES,
         "played_on": PLAYED_ON,
+        "club": _permitted_club(submitter),
     }
     if isinstance(submitter, User):
         values["submitted_by_user"] = submitter
@@ -565,10 +601,13 @@ def test_external_id_wins_over_an_exact_duplicate(
 
 
 def test_another_application_may_reuse_an_external_id(
-    application: PartnerApplication, team_a: list[Player], team_b: list[Player]
+    club: Club,
+    application: PartnerApplication,
+    team_a: list[Player],
+    team_b: list[Player],
 ) -> None:
     _record(team_a, team_b, submitter=application, external_id="ext-1")
-    other: PartnerApplication = PartnerApplicationFactory.create()
+    other = _granted_application(club)
 
     second = _record(_players(2), _players(2), submitter=other, external_id="ext-1")
 
