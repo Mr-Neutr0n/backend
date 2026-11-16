@@ -47,9 +47,11 @@ from django.db.models import (
     DateField,
     DateTimeField,
     DurationField,
+    Exists,
     ExpressionWrapper,
     F,
     Func,
+    OuterRef,
     Q,
     Value,
 )
@@ -264,6 +266,26 @@ class _InsertOnlyModel(models.Model):
 
 class MatchQuerySet(LedgerQuerySet["Match"]):
     """Matches, with the ledger guard."""
+
+    def counted(self) -> "MatchQuerySet":
+        """The matches that count toward ratings.
+
+        A match counts when it is confirmed and no ``possible_duplicate``
+        flag links it, as ``match`` or as ``duplicate_of``, to a match that
+        is not voided. This is ADR 0011's hold, refined only so that a
+        voided match (expired or corrected) stops holding the other one.
+        #40 adds flag resolution.
+        """
+        flags = MatchFlag.objects.filter(reason=FlagReason.POSSIBLE_DUPLICATE)
+        held_as_match = flags.filter(match=OuterRef("pk")).exclude(
+            duplicate_of__status=MatchStatus.VOIDED
+        )
+        held_as_duplicate = flags.filter(duplicate_of=OuterRef("pk")).exclude(
+            match__status=MatchStatus.VOIDED
+        )
+        return self.filter(status=MatchStatus.CONFIRMED).exclude(
+            Exists(held_as_match) | Exists(held_as_duplicate)
+        )
 
 
 class MatchParticipantQuerySet(LedgerQuerySet["MatchParticipant"]):
@@ -560,6 +582,15 @@ class Match(_LinkMessagesModel, _CleanedTextModel):
 
     def delete(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise MatchImmutable
+
+    def is_counted(self) -> bool:
+        """True when this match counts, read from the database.
+
+        See ``MatchQuerySet.counted``. An unsaved match never counts.
+        """
+        if self.pk is None:
+            return False
+        return Match.objects.counted().filter(pk=self.pk).exists()
 
     def clean(self) -> None:
         # Django runs clean() even when a field failed, so a value may still
