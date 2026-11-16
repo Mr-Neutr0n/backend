@@ -8,8 +8,9 @@ that does not parse, `Http404`, any `HttpError`, and
     {"code": "...", "message": "...", "errors": [{"field", "code", "message"}]}
 
 `errors` lists one item per invalid input for a validation error, one item
-for a duplicate match (409), and is empty otherwise. For a pydantic error, an item copies only pydantic's location,
-error type, and message, never its `input` or `ctx`. The message is
+for a duplicate match (409), and is empty otherwise. For a pydantic error,
+an item copies only pydantic's location, error type, and message, never its
+`input` or `ctx`. The message is
 pydantic's own text, so a custom validator must not put the submitted value
 in its error message. A plain `{name: message}` error (ninja's cursor
 pagination raises these) gives one item per key, with code "invalid".

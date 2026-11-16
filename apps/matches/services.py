@@ -780,9 +780,10 @@ def record_match(
     ``transaction.atomic()``. Its advisory locks (an external id lock, then
     a lineup lock) last until the outermost transaction ends, so two
     callers that each record several matches in one outer transaction can
-    deadlock, whatever order they sort them in. A batch path (#71, #72)
-    records each match in its own transaction and reports a result per
-    match.
+    deadlock, whatever order they sort them in. A batch path (#71, #72) must
+    record each match in its own transaction and report a result per
+    match; #71's all-or-nothing mode must get its all-or-nothing result
+    another way.
     """
     keys_a = _player_keys(team_a)
     keys_b = _player_keys(team_b)
