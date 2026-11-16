@@ -28,12 +28,12 @@ def _team_size(match: Match, team: str) -> int:
 
 
 def _decides_the_match(match: Match) -> bool:
-    """True when the games decide the match under the engine's rules.
+    """True when the games decide the match.
 
     Each game's winner reaches the target and wins by 2, the winner of the
     match wins a majority of ``best_of``, and no game follows the deciding
-    game. A test helper only: the backend does not score matches (#24 calls
-    the engine).
+    game. It mirrors the rules in ``apps.matches.services.validate_match``,
+    written out apart so a mistake in one does not hide in the other.
     """
     needed = match.best_of // 2 + 1
     wins = {Team.A: 0, Team.B: 0}

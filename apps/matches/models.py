@@ -17,8 +17,9 @@ These models enforce only what a database constraint can: the allowed
 values of each choice, one submitter, a ``played_at`` that agrees with its
 local date, external IDs unique per Partner Application, at most
 ``MAX_GAMES`` games, and no negative scores. Score validation (win by 2,
-team size per format, games that decide the match) is #24, duplicate
-detection is #25, and confirmation and status changes are #26.
+team size per format, games that decide the match) is
+``apps.matches.services.validate_match``, duplicate detection is #25, and
+confirmation and status changes are #26.
 
 ``ScoringType`` values equal ``open_engine.ScoringType``'s and
 ``GameTarget`` values equal the points in the engine's ``ALL_GAME_FORMATS``,
@@ -55,7 +56,7 @@ from apps.clubs.models import _CleanedTextModel
 from apps.events.models import CHOICE_MESSAGES
 from apps.public_ids.codes import CodeType
 
-# Shared limits, defined once so score validation (#24) imports them.
+# Shared limits, defined once. Score validation (services.py) imports them.
 MAX_GAMES = 5
 MIN_UTC_OFFSET_MINUTES = -720
 MAX_UTC_OFFSET_MINUTES = 840
