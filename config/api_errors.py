@@ -1,7 +1,8 @@
 """The error response schema shared by every API operation, and its handlers.
 
 Errors raised while an operation runs (input that fails validation, a body
-that does not parse, `Http404`, any `HttpError`) come back as an
+that does not parse, `Http404`, any `HttpError`, and
+`apps.matches.services.DuplicateMatchError`) come back as an
 `ErrorResponse`:
 
     {"code": "...", "message": "...", "errors": [{"field", "code", "message"}]}
@@ -12,6 +13,12 @@ error type, and message, never its `input` or `ctx`. The message is
 pydantic's own text, so a custom validator must not put the submitted value
 in its error message. A plain `{name: message}` error (ninja's cursor
 pagination raises these) gives one item per key, with code "invalid".
+
+A `DuplicateMatchError` returns 409 with code "duplicate_match" and one
+item: field `match` and code `duplicate_match` for an exact duplicate, or
+field `external_id` and code `duplicate_external_id` for a repeated
+external id. The message names the earlier match's OPEN code, never a
+submitted value.
 
 These handlers do not see a wrong method on a known path (ninja answers with
 a plain-text 405) or a path that matches no operation (Django's 404 page).
@@ -26,7 +33,15 @@ from django.http import Http404, HttpRequest, HttpResponse
 from ninja import NinjaAPI, Schema
 from ninja.errors import HttpError, ValidationError
 
+from apps.matches.services import DuplicateKind, DuplicateMatchError
+
 VALIDATION_ERROR_STATUS = 422
+DUPLICATE_MATCH_STATUS = 409
+
+_DUPLICATE_FIELDS: Mapping[DuplicateKind, str] = {
+    DuplicateKind.DUPLICATE_MATCH: "match",
+    DuplicateKind.DUPLICATE_EXTERNAL_ID: "external_id",
+}
 
 _STATUS_CODES: Mapping[int, str] = {
     400: "bad_request",
@@ -113,3 +128,21 @@ def install_error_handlers(api: NinjaAPI) -> None:
         # Never include the exception text: it can name internal details.
         body = ErrorResponse(code="not_found", message="Not found.", errors=[])
         return _respond(api, request, 404, body)
+
+    @api.exception_handler(DuplicateMatchError)
+    def on_duplicate_match(
+        request: HttpRequest, exc: DuplicateMatchError
+    ) -> HttpResponse:
+        # The message is fixed text and the earlier match's code.
+        body = ErrorResponse(
+            code="duplicate_match",
+            message=exc.message,
+            errors=[
+                FieldError(
+                    field=_DUPLICATE_FIELDS[exc.kind],
+                    code=exc.kind.value,
+                    message=exc.message,
+                )
+            ],
+        )
+        return _respond(api, request, DUPLICATE_MATCH_STATUS, body)
