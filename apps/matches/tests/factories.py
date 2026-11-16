@@ -136,13 +136,17 @@ class MatchFactory(DjangoModelFactory[Match]):
             )
 
     @post_generation  # type: ignore[untyped-decorator]
-    def fingerprint(self: Match, create: bool, extracted: Any, **kwargs: Any) -> None:
+    def set_fingerprint(
+        self: Match, create: bool, extracted: Any, **kwargs: Any
+    ) -> None:
         """Fingerprint a match that has players and games, as record_match does.
 
         Test setup only, not a ledger edit path. Runs after the participant
-        and game hooks.
+        and game hooks. A fingerprint passed to the factory is kept. The
+        hook's name differs from the field's, so factory_boy passes that
+        value to the model instead of to this hook.
         """
-        if not create:
+        if not create or self.fingerprint:
             return
         participants = list(self.participants.all())
         games = [(g.team_a_score, g.team_b_score) for g in self.games.all()]
