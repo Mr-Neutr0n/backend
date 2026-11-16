@@ -237,8 +237,9 @@ class PartnerApplication(AbstractApplication):
 class ClubApplicationGrant(models.Model):
     """A Club's permission for one Partner Application.
 
-    The rules that use it (which application may submit a Club's matches)
-    are #79. A grant change records no Audit Event yet.
+    ``apps.matches.permissions`` uses it: an approved application with a
+    grant may submit that Club's matches. A grant change records no Audit
+    Event yet.
     """
 
     club = models.ForeignKey(
