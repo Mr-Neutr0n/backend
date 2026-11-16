@@ -58,3 +58,4 @@ Add each record here when it merges.
 - [0008. Public identifiers: OPEN Codes](0008-public-identifiers.md) (issue #92)
 - [0009. Personal data: what OPEN collects and how it is protected](0009-personal-data.md) (issue #93)
 - [0010. Partner applications: a swapped OAuth Application model](0010-partner-application-model.md) (issue #22)
+- [0011. Duplicate match detection](0011-duplicate-match-detection.md) (issue #25)

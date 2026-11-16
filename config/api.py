@@ -29,8 +29,9 @@ document that has none. An operation left out of the document
 operation of `api` covers it.
 
 Errors raised while an operation runs (input that fails validation, a body
-that does not parse, `Http404`, any `HttpError`) come back as `ErrorResponse`
-(see `config/api_errors.py`). Every operation that takes input documents a
+that does not parse, `Http404`, any `HttpError`, and a
+`DuplicateMatchError`, which returns 409) come back as `ErrorResponse` (see
+`config/api_errors.py`). Every operation that takes input documents a
 422 response with that schema, and may not declare a different 422 schema.
 Two kinds of error never reach these handlers: a known path called with the
 wrong method gets ninja's plain-text 405, and a path under /api/v1/ that

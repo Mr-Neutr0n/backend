@@ -1,9 +1,36 @@
-"""Score validation: the rules every match submission must pass.
+"""Score validation and recording: how a match submission enters the ledger.
 
 Every path that submits a Match (the results API, CSV upload, organizer
-tools, partner imports) calls ``validate_match`` before it writes anything,
-so an impossible score never reaches the ledger (CLAUDE.md, hard rule 3).
-The function takes plain values and does no database access.
+tools, partner imports) calls ``record_match``, which calls
+``validate_match`` before it writes anything, so an impossible score never
+reaches the ledger (CLAUDE.md, hard rule 3). ``validate_match`` takes plain
+values and does no database access.
+
+``record_match`` first runs every model rule on the Match, its
+participants, and its games, so nothing invalid reaches a lock, a lookup,
+or the database. It then detects duplicates (a security-sensitive area,
+CLAUDE.md hard rule 8). In one transaction, under advisory locks, it:
+
+- refuses an external id the same Partner Application already used, for a
+  Match in any status (``DuplicateKind.DUPLICATE_EXTERNAL_ID``);
+- refuses an exact duplicate: a Match that is not voided, with the same
+  fingerprint, that is the same two teams in either order, the same date
+  played, and the same game scores (``DuplicateKind.DUPLICATE_MATCH``);
+- saves a near duplicate (a Match that is not voided, with the same two
+  teams and date but other scores) and flags it with one ``MatchFlag`` per
+  earlier Match.
+
+A refusal raises ``DuplicateMatchError``. It names the earlier Match's
+OPEN code only when the submitter may know it: the same Account or
+Partner Application submitted that Match, or the submitting Account's
+Player played in it. Anyone else learns only that such a match exists.
+The database backs the exact rule with a partial unique constraint
+on the fingerprint, and the external id rule with its own constraint. A
+concurrent insert that trips either still raises ``DuplicateMatchError``.
+The same teams playing the same scores twice on one day count as one
+match: ``sequence`` is not part of the fingerprint.
+
+The rest of this docstring describes ``validate_match``.
 
 Players are any hashable reference, since each path resolves players its
 own way, but each player must be given as exactly one canonical reference:
@@ -30,22 +57,41 @@ No rule reads payment status or any paid entitlement: the function takes
 no such input (CLAUDE.md, hard rule 7).
 """
 
+import hashlib
+import json
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import TypeGuard
+from enum import StrEnum
+from typing import TYPE_CHECKING, TypeGuard
 
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
+from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 
 from apps.matches.models import (
     MAX_GAMES,
     MAX_UTC_OFFSET_MINUTES,
     BestOf,
+    FlagReason,
+    Game,
     GameTarget,
+    Match,
+    MatchFlag,
     MatchFormat,
+    MatchParticipant,
+    MatchStatus,
     ScoringType,
     Team,
 )
+from apps.players.models import Player
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import _User
+
+    from apps.clubs.models import Club
+    from apps.events.models import Event
+    from apps.partners.models import PartnerApplication
 
 PLAYERS_PER_TEAM: dict[MatchFormat, int] = {
     MatchFormat.SINGLES: 1,
@@ -58,9 +104,13 @@ WIN_MARGIN = 2
 class MatchIssue:
     """One problem with a submission.
 
-    ``field`` is ``format``, ``team_a``, ``team_b``, ``games``,
-    ``games.<i>`` (0-based), ``played_on``, ``best_of``, ``game_target``, or
-    ``scoring_type``.
+    From ``validate_match``, ``field`` is ``format``, ``team_a``,
+    ``team_b``, ``games``, ``games.<i>`` (0-based), ``played_on``,
+    ``best_of``, ``game_target``, or ``scoring_type``. ``record_match``
+    also reports the model's rules: a ``Match`` field's name (such as
+    ``external_id``, ``played_on``, or ``submitted_by_user``), ``match`` for
+    a rule on the whole Match, ``games.<i>`` for a game's field, and
+    ``team_a`` or ``team_b`` for a participant's.
     """
 
     field: str
@@ -409,3 +459,418 @@ def validate_match(
         game_target=target,
         scoring_type=scoring,
     )
+
+
+# Duplicate detection.
+
+_FINGERPRINT_VERSION = 1
+
+
+def _canonical_teams(
+    team_a: Sequence[int], team_b: Sequence[int]
+) -> tuple[tuple[int, ...], tuple[int, ...], bool]:
+    """Each team sorted, the lower team first, and whether they were swapped."""
+    first, second = tuple(sorted(team_a)), tuple(sorted(team_b))
+    if first > second:
+        return second, first, True
+    return first, second, False
+
+
+def _digest(payload: dict[str, object]) -> bytes:
+    text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(text.encode()).digest()
+
+
+def match_fingerprint(
+    team_a: Sequence[int],
+    team_b: Sequence[int],
+    played_on: date,
+    games: Sequence[Sequence[int]],
+) -> str:
+    """A SHA-256 hex digest of the teams, the date played, and the scores.
+
+    Players are Player primary keys. Neither the team order (with each
+    game's scores swapped to match) nor the player order within a team
+    changes it. Any other change to the players, date, or scores does.
+    """
+    first, second, swapped = _canonical_teams(team_a, team_b)
+    scores = [[b, a] if swapped else [a, b] for a, b in games]
+    payload: dict[str, object] = {
+        "v": _FINGERPRINT_VERSION,
+        "teams": [list(first), list(second)],
+        "played_on": played_on.isoformat(),
+        "games": scores,
+    }
+    return _digest(payload).hex()
+
+
+def _lock_key(payload: dict[str, object]) -> int:
+    """A signed 64-bit advisory lock key for a payload."""
+    return int.from_bytes(_digest(payload)[:8], "big", signed=True)
+
+
+def _lineup_lock_key(
+    team_a: Sequence[int], team_b: Sequence[int], played_on: date
+) -> int:
+    """One lock for every exact and near duplicate of a lineup on a date."""
+    first, second, _swapped = _canonical_teams(team_a, team_b)
+    return _lock_key(
+        {
+            "lock": "lineup",
+            "teams": [list(first), list(second)],
+            "played_on": played_on.isoformat(),
+        }
+    )
+
+
+def _external_id_lock_key(application_id: int, external_id: str) -> int:
+    """One lock for an application's external id."""
+    return _lock_key(
+        {"lock": "external_id", "application": application_id, "id": external_id}
+    )
+
+
+_FINGERPRINT_CONSTRAINT = "matches_match_fingerprint_unique_unless_voided"
+_EXTERNAL_ID_CONSTRAINT = "matches_match_external_id_unique_per_application"
+
+
+class DuplicateKind(StrEnum):
+    """Why a submission was refused as a duplicate."""
+
+    DUPLICATE_MATCH = "duplicate_match"
+    DUPLICATE_EXTERNAL_ID = "duplicate_external_id"
+
+
+_DUPLICATE_MESSAGES: dict[DuplicateKind, str] = {
+    DuplicateKind.DUPLICATE_MATCH: "This match was already submitted",
+    DuplicateKind.DUPLICATE_EXTERNAL_ID: (
+        "This application already submitted a match with this external ID"
+    ),
+}
+_CODE_JOINERS: dict[DuplicateKind, str] = {
+    DuplicateKind.DUPLICATE_MATCH: " as ",
+    DuplicateKind.DUPLICATE_EXTERNAL_ID: ": ",
+}
+
+
+class DuplicateMatchError(Exception):
+    """A submission repeats an earlier Match.
+
+    ``existing_code`` is that Match's OPEN code when the submitter may know
+    it (see ``_visible_code``), otherwise None. The message is fixed text
+    and that code, never a submitted value.
+    """
+
+    def __init__(self, kind: DuplicateKind, existing_code: str | None) -> None:
+        self.kind = kind
+        self.existing_code = existing_code
+        super().__init__(self.message)
+
+    @property
+    def message(self) -> str:
+        text = _DUPLICATE_MESSAGES[self.kind]
+        if self.existing_code is None:
+            return f"{text}."
+        return f"{text}{_CODE_JOINERS[self.kind]}{self.existing_code}."
+
+
+def _visible_code(
+    existing: Match,
+    submitted_by_user: "_User | None",
+    submitted_by_application: "PartnerApplication | None",
+) -> str | None:
+    """The earlier Match's code, if the submitter may know it, else None.
+
+    The submitter may know it when it submitted that Match (the same
+    Account or Partner Application), or when the submitting Account's
+    Player played in it. Anyone else learns only that such a match exists.
+    """
+    if (
+        submitted_by_application is not None
+        and existing.submitted_by_application_id == submitted_by_application.pk
+    ):
+        return existing.public_code
+    if submitted_by_user is not None and (
+        existing.submitted_by_user_id == submitted_by_user.pk
+        or existing.participants.filter(player__account=submitted_by_user).exists()
+    ):
+        return existing.public_code
+    return None
+
+
+def _issues_from_validation_error(error: ValidationError) -> list[MatchIssue]:
+    """One ``MatchIssue`` per model validation error. Non-field errors go
+    under ``match``."""
+    issues: list[MatchIssue] = []
+    for name, items in error.error_dict.items():
+        field = "match" if name == NON_FIELD_ERRORS else name
+        for item in items:
+            for message in item.messages:
+                issues.append(MatchIssue(field, item.code or "invalid", message))
+    return issues
+
+
+def _advisory_lock(key: int) -> None:
+    """Hold a Postgres advisory lock until the transaction ends."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [key])
+
+
+def _external_id_match(
+    application: "PartnerApplication", external_id: str
+) -> Match | None:
+    # Any status: a voided Match keeps its external id.
+    return (
+        Match.objects.filter(
+            submitted_by_application=application, external_id=external_id
+        )
+        .order_by("created_at", "pk")
+        .first()
+    )
+
+
+def _exact_match(fingerprint: str) -> Match | None:
+    return (
+        Match.objects.filter(fingerprint=fingerprint)
+        .exclude(status=MatchStatus.VOIDED)
+        .order_by("created_at", "pk")
+        .first()
+    )
+
+
+def _near_matches(
+    team_a: Sequence[int], team_b: Sequence[int], played_on: date
+) -> list[Match]:
+    """Matches that are not voided, with the same two teams and date, in any order.
+
+    Step ``_exact_match`` already ruled out equal fingerprints, so these
+    differ in scores, or have no fingerprint (a row made outside
+    ``record_match``).
+    """
+    lineup = {frozenset(team_a), frozenset(team_b)}
+    candidates = (
+        Match.objects.filter(played_on=played_on, participants__player_id=team_a[0])
+        .exclude(status=MatchStatus.VOIDED)
+        .distinct()
+        .order_by("created_at", "pk")
+        .prefetch_related("participants")
+    )
+    near: list[Match] = []
+    for candidate in candidates:
+        teams: dict[str, set[int]] = {Team.A: set(), Team.B: set()}
+        for participant in candidate.participants.all():
+            teams.setdefault(participant.team, set()).add(participant.player_id)
+        if {frozenset(members) for members in teams.values()} == lineup:
+            near.append(candidate)
+    return near
+
+
+def _player_keys(team: object) -> list[int]:
+    """Each team member's pk. A member that is not a saved Player is a
+    programming error, not user input."""
+    if not isinstance(team, list | tuple):
+        # validate_match reports it.
+        return []
+    keys: list[int] = []
+    for member in team:
+        if not isinstance(member, Player) or member.pk is None:
+            raise TypeError("record_match takes saved Players as team members.")
+        keys.append(member.pk)
+    return keys
+
+
+def _clean_all(
+    match: Match, participants: Sequence[MatchParticipant], games: Sequence[Game]
+) -> None:
+    """Run every model's field and clean() rules, before anything is written.
+
+    Raises one ``MatchValidationError`` with every issue. The unique
+    constraints are left to the duplicate checks and the database: a
+    conflict that slips past the checks becomes ``DuplicateMatchError`` on
+    insert. A game's issues go under ``games.<i>`` and a participant's
+    under its team's field.
+    """
+    issues: list[MatchIssue] = []
+    try:
+        match.full_clean(validate_constraints=False)
+    except ValidationError as error:
+        issues.extend(_issues_from_validation_error(error))
+    for participant in participants:
+        field = "team_a" if participant.team == Team.A else "team_b"
+        try:
+            participant.full_clean(exclude=["match"], validate_constraints=False)
+        except ValidationError as error:
+            issues.extend(
+                MatchIssue(field, issue.code, issue.message)
+                for issue in _issues_from_validation_error(error)
+            )
+    for index, game in enumerate(games):
+        try:
+            game.full_clean(exclude=["match"], validate_constraints=False)
+        except ValidationError as error:
+            issues.extend(
+                MatchIssue(f"games.{index}", issue.code, issue.message)
+                for issue in _issues_from_validation_error(error)
+            )
+    if issues:
+        raise MatchValidationError(issues)
+
+
+def _save_new(match: Match) -> None:
+    """Insert the Match, turning a duplicate constraint into DuplicateMatchError.
+
+    The pre-insert checks run under advisory locks, so this fires only when
+    a write skipped them.
+    """
+    try:
+        with transaction.atomic():
+            match.save()
+    except IntegrityError as error:
+        constraint = getattr(
+            getattr(error.__cause__, "diag", None), "constraint_name", None
+        )
+        existing: Match | None = None
+        kind = DuplicateKind.DUPLICATE_MATCH
+        if constraint == _EXTERNAL_ID_CONSTRAINT and match.submitted_by_application:
+            kind = DuplicateKind.DUPLICATE_EXTERNAL_ID
+            existing = _external_id_match(
+                match.submitted_by_application, match.external_id
+            )
+        elif constraint == _FINGERPRINT_CONSTRAINT:
+            existing = _exact_match(match.fingerprint)
+        if existing is None:
+            raise
+        code = _visible_code(
+            existing, match.submitted_by_user, match.submitted_by_application
+        )
+        raise DuplicateMatchError(kind, code) from None
+
+
+def record_match(
+    *,
+    format: str,
+    team_a: Sequence[Player],
+    team_b: Sequence[Player],
+    games: Sequence[tuple[int, int]],
+    played_on: date,
+    best_of: int | None = None,
+    game_target: int | None = None,
+    scoring_type: str | None = None,
+    submitted_by_user: "_User | None" = None,
+    submitted_by_application: "PartnerApplication | None" = None,
+    external_id: str = "",
+    event: "Event | None" = None,
+    club: "Club | None" = None,
+    played_at: datetime | None = None,
+    played_at_utc_offset: int | None = None,
+    location: str = "",
+    event_label: str = "",
+    bracket_label: str = "",
+    sequence: int = 0,
+) -> Match:
+    """Validate a submission, check it for duplicates, and add it to the ledger.
+
+    Teams are saved Players. Raises ``MatchValidationError`` for a score or
+    model rule, ``DuplicateMatchError`` for an exact duplicate or a repeated
+    external id, and writes nothing in either case. A near duplicate is
+    saved with one ``possible_duplicate`` flag per earlier Match. The new
+    Match has the model's default status (#26 owns confirmation).
+
+    Call it in its own transaction, never several times inside one outer
+    ``transaction.atomic()``. Its advisory locks (an external id lock, then
+    a lineup lock) last until the outermost transaction ends, so two
+    callers that each record several matches in one outer transaction can
+    deadlock, whatever order they sort them in. A batch path (#71, #72) must
+    record each match in its own transaction and report a result per
+    match; #71's all-or-nothing mode must get its all-or-nothing result
+    another way.
+    """
+    keys_a = _player_keys(team_a)
+    keys_b = _player_keys(team_b)
+    validated = validate_match(
+        format=format,
+        team_a=team_a,
+        team_b=team_b,
+        games=games,
+        played_on=played_on,
+        best_of=best_of,
+        game_target=game_target,
+        scoring_type=scoring_type,
+    )
+    fingerprint = match_fingerprint(
+        keys_a, keys_b, validated.played_on, validated.games
+    )
+
+    match = Match(
+        format=validated.format,
+        played_on=validated.played_on,
+        best_of=validated.best_of,
+        game_target=validated.game_target,
+        scoring_type=validated.scoring_type,
+        submitted_by_user=submitted_by_user,
+        submitted_by_application=submitted_by_application,
+        external_id=external_id,
+        event=event,
+        club=club,
+        played_at=played_at,
+        played_at_utc_offset=played_at_utc_offset,
+        location=location,
+        event_label=event_label,
+        bracket_label=bracket_label,
+        sequence=sequence,
+        fingerprint=fingerprint,
+    )
+    participants = [
+        MatchParticipant(match=match, player_id=key, team=team)
+        for team, keys in ((Team.A, keys_a), (Team.B, keys_b))
+        for key in keys
+    ]
+    game_rows = [
+        Game(match=match, game_number=number, team_a_score=a, team_b_score=b)
+        for number, (a, b) in enumerate(validated.games, start=1)
+    ]
+    # Every model rule runs before any lock, lookup, or write. Among other
+    # things this strips external_id, so the lookup below uses the stored
+    # form.
+    _clean_all(match, participants, game_rows)
+
+    with transaction.atomic():
+        if match.external_id and submitted_by_application is not None:
+            _advisory_lock(
+                _external_id_lock_key(submitted_by_application.pk, match.external_id)
+            )
+            existing = _external_id_match(submitted_by_application, match.external_id)
+            if existing is not None:
+                # The same application submitted it, so the code is named.
+                raise DuplicateMatchError(
+                    DuplicateKind.DUPLICATE_EXTERNAL_ID, existing.public_code
+                )
+
+        _advisory_lock(_lineup_lock_key(keys_a, keys_b, validated.played_on))
+        existing = _exact_match(fingerprint)
+        if existing is not None:
+            raise DuplicateMatchError(
+                DuplicateKind.DUPLICATE_MATCH,
+                _visible_code(existing, submitted_by_user, submitted_by_application),
+            )
+        near = _near_matches(keys_a, keys_b, validated.played_on)
+
+        _save_new(match)
+        # Set the links again now that the Match has its primary key.
+        for participant in participants:
+            participant.match = match
+        for game in game_rows:
+            game.match = match
+        MatchParticipant.objects.bulk_create(participants)
+        Game.objects.bulk_create(game_rows)
+        MatchFlag.objects.bulk_create(
+            [
+                MatchFlag(
+                    match=match,
+                    reason=FlagReason.POSSIBLE_DUPLICATE,
+                    duplicate_of=earlier,
+                )
+                for earlier in near
+            ]
+        )
+    return match

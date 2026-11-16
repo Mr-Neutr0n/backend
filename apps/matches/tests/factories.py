@@ -22,6 +22,7 @@ from apps.matches.models import (
     ScoringType,
     Team,
 )
+from apps.matches.services import match_fingerprint
 from apps.partners.tests.factories import PartnerApplicationFactory
 from apps.players.tests.factories import PlayerFactory
 
@@ -86,7 +87,9 @@ class MatchFactory(DjangoModelFactory[Match]):
     Traits: ``best_of_1``, ``best_of_3``, ``best_of_5``, ``side_out``,
     ``rally``, and ``by_application`` (a Partner Application submitted it,
     with an external ID). Pass ``games=False`` or ``participants=False``
-    to leave those out.
+    to leave those out. A match with both gets the fingerprint
+    ``record_match`` would give it, so it is found as a duplicate; one
+    without either has a blank fingerprint.
     """
 
     class Meta:
@@ -131,6 +134,31 @@ class MatchFactory(DjangoModelFactory[Match]):
             GameFactory.create(
                 match=self, game_number=number, team_a_score=a, team_b_score=b
             )
+
+    @post_generation  # type: ignore[untyped-decorator]
+    def set_fingerprint(
+        self: Match, create: bool, extracted: Any, **kwargs: Any
+    ) -> None:
+        """Fingerprint a match that has players and games, as record_match does.
+
+        Test setup only, not a ledger edit path. Runs after the participant
+        and game hooks. A fingerprint passed to the factory is kept. The
+        hook's name differs from the field's, so factory_boy passes that
+        value to the model instead of to this hook.
+        """
+        if not create or self.fingerprint:
+            return
+        participants = list(self.participants.all())
+        games = [(g.team_a_score, g.team_b_score) for g in self.games.all()]
+        if not participants or not games:
+            return
+        teams = {
+            team: [p.player_id for p in participants if p.team == team] for team in Team
+        }
+        self.fingerprint = match_fingerprint(
+            teams[Team.A], teams[Team.B], self.played_on, games
+        )
+        self.save(update_fields=["fingerprint"])
 
 
 class DoublesMatchFactory(MatchFactory):
