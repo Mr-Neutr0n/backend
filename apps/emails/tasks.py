@@ -39,7 +39,9 @@ JITTER = 30
 # The sweep deletes a row this old: allauth's keys have expired by then.
 EXPIRY = timedelta(days=3)
 # The sweep queues again a row that has waited this long with no send
-# attempt, such as one whose task never reached the broker.
+# attempt, such as one whose task never reached the broker. It must stay
+# well above LEASE + MAX_COUNTDOWN, so a row waiting for a retry is never
+# taken for a stuck one.
 STUCK_AFTER = timedelta(hours=1)
 SWEEP_BATCH = 500
 
@@ -115,8 +117,14 @@ def _claim(queued_email_id: int) -> QueuedEmail | None:
 
 
 def _release(row: QueuedEmail) -> None:
-    """Clear the lease, so the next retry can claim the row."""
-    QueuedEmail.objects.filter(pk=row.pk).update(last_attempt_at=None)
+    """End the lease now, so the next retry can claim the row.
+
+    The attempt time moves back by one lease, not to empty: the retry can
+    claim the row at once, but the sweep still sees a recent attempt and
+    leaves the row to its retry chain until STUCK_AFTER passes. Every
+    countdown (at most MAX_COUNTDOWN) is far shorter than that.
+    """
+    QueuedEmail.objects.filter(pk=row.pk).update(last_attempt_at=timezone.now() - LEASE)
 
 
 # Named explicitly: queued messages carry the name, so a rename or move

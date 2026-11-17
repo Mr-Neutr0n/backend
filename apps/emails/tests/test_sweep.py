@@ -7,6 +7,7 @@ import pytest
 from django.utils import timezone
 from kombu.serialization import dumps
 
+from apps.emails import tasks
 from apps.emails.models import QueuedEmail
 from apps.emails.tasks import send_queued_email, sweep_queued_emails
 from config import celery_app
@@ -125,3 +126,7 @@ def test_beat_runs_the_sweep_every_fifteen_minutes() -> None:
     assert schedule.minute == {0, 15, 30, 45}
     assert schedule.hour == set(range(24))
     assert entry["options"] == {"expire_seconds": 900}
+
+
+def test_a_retry_countdown_ends_long_before_a_row_looks_stuck() -> None:
+    assert tasks.LEASE + timedelta(seconds=tasks.MAX_COUNTDOWN) < tasks.STUCK_AFTER / 2
