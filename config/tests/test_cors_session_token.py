@@ -22,8 +22,13 @@ def allowed_client() -> Iterator[Client]:
         yield Client()
 
 
-def test_allowed_headers_are_the_defaults_plus_the_session_token() -> None:
-    assert tuple(settings.CORS_ALLOW_HEADERS) == (*default_headers, "x-session-token")
+def test_allowed_headers_are_the_defaults_plus_allauths_headers() -> None:
+    assert tuple(settings.CORS_ALLOW_HEADERS) == (
+        *default_headers,
+        "x-session-token",
+        "x-email-verification-key",
+        "x-password-reset-key",
+    )
     assert settings.CORS_ALLOW_CREDENTIALS is False
 
 
