@@ -50,8 +50,8 @@ def test_frontend_urls_are_built_from_the_origin() -> None:
 
 
 def test_surrounding_whitespace_is_stripped() -> None:
-    assert _loaded(" http://localhost:8081 ")["FRONTEND_URL"] == (
-        "http://localhost:8081"
+    assert _loaded(" https://app.example.org:8443 ")["FRONTEND_URL"] == (
+        "https://app.example.org:8443"
     )
 
 

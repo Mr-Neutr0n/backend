@@ -42,7 +42,7 @@ DJANGO_ALLOWED_HOSTS=dotenv.example
 DATABASE_URL=postgres://open@dotenv-db.example:5432/open
 REDIS_URL=redis://dotenv-cache.example:6379/0
 CSRF_TRUSTED_ORIGINS=
-FRONTEND_URL=http://localhost:8081
+FRONTEND_URL=https://dotenv-app.example
 """
 
 
