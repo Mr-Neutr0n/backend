@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 import django_stubs_ext
 import environ
 from celery.schedules import crontab
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 from kombu import Queue
 
@@ -278,10 +279,14 @@ CORS_URLS_REGEX = r"^/(api|_allauth)/"
 # Never a wildcard, and never read from the environment.
 CORS_ALLOW_ALL_ORIGINS = False
 # Browsers send no cookies or session credentials cross-origin. Partner
-# clients authenticate with bearer tokens (issue #27), and allauth's app
-# client with the X-Session-Token header. allauth's browser client works
-# same-origin only until #102 allows credentials for first-party origins.
+# clients authenticate with bearer tokens (issue #27). allauth's app
+# client, run in a browser on an allowed origin, sends its session token
+# in the X-Session-Token header, which CORS_ALLOW_HEADERS allows. allauth's
+# browser client uses the session cookie, so it works same-origin only
+# until #102 allows credentials for first-party origins.
 CORS_ALLOW_CREDENTIALS = False
+# corsheaders' default request headers, plus allauth's session token.
+CORS_ALLOW_HEADERS = (*default_headers, "x-session-token")
 
 # Valkey URL (redis:// or rediss://). The cache and Celery (issue #9)
 # read it from here.
