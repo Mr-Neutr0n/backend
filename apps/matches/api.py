@@ -25,9 +25,8 @@ match (hard rule 7).
 """
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, cast
 
-from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.http import Http404, HttpRequest
 from ninja import Router, Status
@@ -57,17 +56,9 @@ _TEAMS = ("team_a", "team_b")
 
 
 def request_account(request: HttpRequest) -> "_User":
-    """The signed-in Account, as a plain Account instance.
-
-    ``account_auth`` refuses everyone else. The session cookie path puts
-    Django's lazy ``request.user`` in ``request.auth``; the match services
-    read the actor's model class, so a lazy proxy is loaded again by id.
-    """
-    auth = request.auth  # type: ignore[attr-defined]
-    model = get_user_model()
-    if type(auth) is model:
-        return auth
-    return model.objects.get(pk=auth.pk)
+    """The signed-in Account. ``account_auth`` refuses everyone else, and
+    puts the Account itself in ``request.auth`` (``config/auth.py``)."""
+    return cast("_User", request.auth)  # type: ignore[attr-defined]
 
 
 def _in_body(error: MatchValidationError) -> MatchValidationError:

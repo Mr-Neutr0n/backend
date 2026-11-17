@@ -8,8 +8,9 @@
   methods (`SessionAuth`, a subclass of ninja's).
 
 Pass it as an operation's or router's `auth`. The signed-in Account is in
-`request.auth` (and `request.user`). On the session cookie path it is
-Django's lazy `request.user`, not a plain Account instance. A request that
+`request.auth` (and `request.user`) as a plain Account instance, never
+Django's lazy proxy, so a view can pass it straight to a service that
+reads the actor's model class. A request that
 neither one authenticates gets a 401 `ErrorResponse`
 (`config/api_errors.py`), whatever its method. A signed-in session's
 unsafe request without a valid CSRF token gets 403.
@@ -49,6 +50,17 @@ class SessionAuth(NinjaSessionAuth):
         if not request.user.is_authenticated:
             return None
         return super().__call__(request)
+
+    def authenticate(self, request: HttpRequest, key: str | None) -> Any | None:
+        """The signed-in Account itself, not Django's lazy ``request.user``.
+
+        ``__call__`` already read ``is_authenticated``, which loaded the
+        Account behind the proxy, so unwrapping it needs no query.
+        """
+        user = request.user
+        if not user.is_authenticated:
+            return None
+        return getattr(user, "_wrapped", user)
 
 
 account_auth = [SessionTokenAuth(), SessionAuth()]
