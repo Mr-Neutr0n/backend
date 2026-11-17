@@ -22,12 +22,15 @@ from apps.accounts.tests.headless import (
     browser_client,
     csrf_header,
     login,
-    run_on_commit_after_each_request,
     signup,
     verify_from_last_mail,
 )
 
-pytestmark = pytest.mark.django_db
+# Queued account email is sent when each request returns (ADR 0016).
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.usefixtures("commit_after_each_request"),
+]
 
 ME = "/api/v1/accounts/me"
 EMAIL = "me.player@example.org"
@@ -45,12 +48,6 @@ def _clear_rate_limits() -> Iterator[None]:
     cache.clear()
     yield
     cache.clear()
-
-
-@pytest.fixture(autouse=True)
-def _commit_after_each_request(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Send queued email when each request returns, as a commit would."""
-    run_on_commit_after_each_request(monkeypatch)
 
 
 def _verified() -> None:

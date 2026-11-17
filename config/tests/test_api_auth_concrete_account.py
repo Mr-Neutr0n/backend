@@ -32,7 +32,11 @@ from apps.matches.workflow import confirm_match
 from apps.players.tests.factories import PlayerFactory
 from config.auth import SessionAuth
 
-pytestmark = pytest.mark.django_db
+# Queued account email is sent when each request returns (ADR 0016).
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.usefixtures("commit_after_each_request"),
+]
 
 EMAIL = "lazy.player@example.org"
 

@@ -28,7 +28,11 @@ from apps.matches.models import Match, MatchFormat
 from apps.matches.services import record_match
 from apps.players.tests.factories import PlayerFactory
 
-pytestmark = pytest.mark.django_db
+# Queued account email is sent when each request returns (ADR 0016).
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.usefixtures("commit_after_each_request"),
+]
 
 EMAIL = "csrf.confirmer@example.org"
 ERROR_REF = {"$ref": "#/components/schemas/ErrorResponse"}
