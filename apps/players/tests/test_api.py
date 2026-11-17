@@ -22,6 +22,7 @@ from apps.matches.services import record_match
 from apps.matches.workflow import confirm_match, dispute_match, void_match
 from apps.players.models import Player, PlayerPrivacy, Visibility
 from apps.players.tests.factories import PlayerFactory
+from apps.public_ids.codes import CodeType, generate
 
 pytestmark = pytest.mark.django_db
 
@@ -288,3 +289,34 @@ def test_history_is_documented() -> None:
     assert params["limit"]["default"] == 20
     assert (params["limit"]["minimum"], params["limit"]["maximum"]) == (1, 100)
     assert params["offset"]["minimum"] == 0
+
+
+def _well_formed_unknown_code() -> str:
+    taken = set(Player.objects.values_list("public_code", flat=True))
+    while (code := generate(CodeType.PLAYER)) in taken:
+        pass
+    return code
+
+
+@pytest.mark.parametrize("hidden_by", ["private", "inactive"])
+@pytest.mark.parametrize("unknown", ["well_formed", "malformed"])
+def test_hidden_history_matches_any_unknown_code_404(
+    players: list[Player], every_status: dict[str, Match], hidden_by: str, unknown: str
+) -> None:
+    if hidden_by == "private":
+        PlayerPrivacy.objects.filter(player=players[0]).update(
+            match_history_visibility=Visibility.PRIVATE
+        )
+    else:
+        get_user_model().objects.filter(pk=players[0].account_id).update(
+            is_active=False
+        )
+    code = _well_formed_unknown_code() if unknown == "well_formed" else "not-a-code"
+    client = signed_in(players[1].account)
+
+    refused = history(client, players[0].public_code)
+    missing = history(client, code)
+
+    assert refused.status_code == missing.status_code == 404
+    assert refused.content == missing.content
+    assert refused["Content-Type"] == missing["Content-Type"]
