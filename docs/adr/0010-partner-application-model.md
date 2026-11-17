@@ -29,7 +29,7 @@ Client secrets let a partner submit matches that may count as confirmed, so how 
 - Swapping the model later would mean migrating every token table by hand. Treat the setting like `AUTH_USER_MODEL`.
 - A toolkit upgrade that changes `AbstractApplication` needs a new `partners` migration. `makemigrations --check` catches a missing one. An upgrade that changes the toolkit's first migration needs the `run_before` line checked again.
 - An application that has acted cannot be deleted (`actor_application` uses `PROTECT`), and the toolkit's `user` foreign key cascades, so an Account whose application has acted cannot be hard-deleted either. #29 revokes applications instead of deleting them, and #116 plans Account deletion around this. An Organizer with an application cannot be deleted.
-- Until #27, #28, and #29 land, the token endpoint issues tokens without checking approval, the sandbox flag, or which scopes each application may have. No API operation accepts a token yet.
+- Until #27, #28, and #29 land, the token endpoint issues tokens without checking approval, the sandbox flag, or which scopes each application may have. No API operation accepts an OAuth token yet.
 - Raw writes (`QuerySet.update`, `bulk_create`, `loaddata`, raw SQL) skip the model's checks. The database still refuses an empty secret and `hash_client_secret=False`.
 
 ## Alternatives considered

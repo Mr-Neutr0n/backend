@@ -4,7 +4,7 @@
 
 Backend services and APIs for [OPEN](https://github.com/openpickleball), the Open Pickleball Evaluation Network.
 
-> **Project status:** OPEN is in early development. This repository holds the project scaffold, the account model, the append-only audit log, the OPEN Code scheme for public identifiers, the Player model with its privacy settings, the Club and Organizer models with organizer verification, partner OAuth applications (django-oauth-toolkit) with token and revoke endpoints at `/oauth/token/` and `/oauth/revoke_token/`, the Match, Match Participant, Game, Match Flag, and Match Confirmation models of the match ledger with score validation, duplicate detection, match submission permissions, and the confirmation workflow (confirm, dispute, void, correct, and expire), the API mount at `/api/v1/`, the Celery background task setup, static file serving and CORS for the API, a gunicorn configuration, and the local development services so far. The API's only operations are the liveness and readiness checks, at `/api/v1/health/live` and `/api/v1/health/ready`. No OPEN rating is live.
+> **Project status:** OPEN is in early development. This repository holds the project scaffold, the account model with sign-up, login, email verification, and password reset (django-allauth, headless, at `/_allauth/`), the append-only audit log, the OPEN Code scheme for public identifiers, the Player model with its privacy settings, the Club and Organizer models with organizer verification, partner OAuth applications (django-oauth-toolkit) with token and revoke endpoints at `/oauth/token/` and `/oauth/revoke_token/`, the Match, Match Participant, Game, Match Flag, and Match Confirmation models of the match ledger with score validation, duplicate detection, match submission permissions, and the confirmation workflow (confirm, dispute, void, correct, and expire), the API mount at `/api/v1/`, the Celery background task setup, static file serving and CORS for the API, a gunicorn configuration, and the local development services so far. The API's only operations are the liveness and readiness checks, at `/api/v1/health/live` and `/api/v1/health/ready`, and the signed-in Account at `/api/v1/accounts/me`. No OPEN rating is live.
 
 ## Technology
 
@@ -41,7 +41,7 @@ To run the app, start the development server:
 uv run python manage.py runserver
 ```
 
-The interactive API docs are then at http://127.0.0.1:8000/api/v1/docs, and the OpenAPI document is at http://127.0.0.1:8000/api/v1/openapi.json. For a quick check, http://127.0.0.1:8000/api/v1/health/live answers when the app is up.
+The interactive API docs are then at http://127.0.0.1:8000/api/v1/docs, and the OpenAPI document is at http://127.0.0.1:8000/api/v1/openapi.json. For a quick check, http://127.0.0.1:8000/api/v1/health/live answers when the app is up. The account endpoints (sign-up, login, email verification, password reset) are documented at http://127.0.0.1:8000/_allauth/openapi.html. With `DJANGO_DEBUG` on, their emails print to the server's console.
 
 ### Settings
 
@@ -51,7 +51,7 @@ Settings come from environment variables. For local development, copy `.env.exam
 uv run python manage.py check
 ```
 
-Without a `.env` or the variables in your environment, every command that loads settings stops with an error. Django's commands name the missing variable; mypy does not (see below). `DJANGO_DEBUG` is off unless set to a true value, and with it off `DJANGO_SECRET_KEY` is required.
+Without a `.env` or the variables in your environment, every command that loads settings stops with an error. Django's commands name the missing variable; mypy does not (see below). `DJANGO_DEBUG` is off unless set to a true value, and with it off `DJANGO_SECRET_KEY` is required. `FRONTEND_URL` is required too: it is the web app's origin, which links in account emails open, and it must be https when `DJANGO_DEBUG` is off. If your `.env` predates it, copy the line from `.env.example`.
 
 Docker Compose also reads `.env` and treats a `$` in a value as a variable reference. If your secret key contains `$`, wrap it in single quotes: `DJANGO_SECRET_KEY='...'`.
 
@@ -78,7 +78,7 @@ Run only one beat process. Tests run tasks eagerly, so they need no worker and n
 
 ### Serving like production
 
-To serve the app the way production does, with `DJANGO_DEBUG` off, collect the static files first and then start gunicorn. gunicorn reads `gunicorn.conf.py`, which takes `PORT` (default 8000) and `WEB_CONCURRENCY` (default 2 workers) from the process environment, not from `.env`. With `DJANGO_DEBUG` off, settings redirect plain http to https, so a local request needs the `X-Forwarded-Proto: https` header that the hosting proxy would set, and `DJANGO_ALLOWED_HOSTS` must name the host you request (for example `127.0.0.1`).
+To serve the app the way production does, with `DJANGO_DEBUG` off, collect the static files first and then start gunicorn. gunicorn reads `gunicorn.conf.py`, which takes `PORT` (default 8000) and `WEB_CONCURRENCY` (default 2 workers) from the process environment, not from `.env`. With `DJANGO_DEBUG` off, settings redirect plain http to https, so a local request needs the `X-Forwarded-Proto: https` header that the hosting proxy would set, and `DJANGO_ALLOWED_HOSTS` must name the host you request (for example `127.0.0.1`). `FRONTEND_URL` must be https, for example `https://app.example.org`.
 
 ```bash
 uv run python manage.py collectstatic --noinput
@@ -89,7 +89,7 @@ With `DJANGO_DEBUG` off, the admin and the API docs page return an error until `
 
 ### CORS
 
-A browser page on another origin can read API responses only if its origin is listed in `CORS_ALLOWED_ORIGINS`, comma-separated, as exact origins such as `https://app.example.org` or `http://localhost:3000`. It is empty by default, so no other origin is allowed. Only `/api/` paths send CORS headers. CORS limits what browsers let a page read; it is not access control, and it does not limit other clients.
+A browser page on another origin can read API responses only if its origin is listed in `CORS_ALLOWED_ORIGINS`, comma-separated, as exact origins such as `https://app.example.org` or `http://localhost:3000`. It is empty by default, so no other origin is allowed. Only `/api/` and `/_allauth/` paths send CORS headers. CORS limits what browsers let a page read; it is not access control, and it does not limit other clients.
 
 ### Lint, types, and git hooks
 
