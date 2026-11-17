@@ -105,6 +105,11 @@ module = ["allauth", "allauth.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# django-anymail ships no type information.
+module = ["anymail", "anymail.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # OPEN's allauth adapters, backend, and API auth subclass allauth's
 # untyped classes.
 module = [
