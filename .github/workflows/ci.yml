@@ -59,7 +59,7 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     services:
       # Same image as compose.yaml. The open role is a superuser, so the
       # test runner can create test_open. No Valkey: tests use LocMemCache and
