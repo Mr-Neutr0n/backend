@@ -162,7 +162,25 @@ def create_match(request: HttpRequest, payload: MatchCreateIn) -> Status[MatchOu
     return Status(201, match_out(_loaded(recorded.match), account))
 
 
-_CHANGE_RESPONSES = {200: MatchOut, 404: ErrorResponse, 409: ErrorResponse}
+_CHANGE_RESPONSES = {
+    200: MatchOut,
+    403: ErrorResponse,
+    404: ErrorResponse,
+    409: ErrorResponse,
+}
+# The only 403 these operations return is a session request's CSRF
+# failure (``config/auth.py``). A refused actor gets the 404.
+_CHANGE_OPENAPI = {
+    "responses": {
+        403: {
+            "description": (
+                "Only a signed-in browser session request without a valid "
+                "CSRF token. A caller who may not change this match gets "
+                "404, as for an unknown code."
+            )
+        }
+    }
+}
 
 
 def _change(
@@ -185,7 +203,10 @@ def _change(
 
 
 @router.post(
-    "/{code}/confirm", response=_CHANGE_RESPONSES, operation_id="confirm_match"
+    "/{code}/confirm",
+    response=_CHANGE_RESPONSES,
+    operation_id="confirm_match",
+    openapi_extra=_CHANGE_OPENAPI,
 )
 def confirm_match(request: HttpRequest, code: MatchCode) -> MatchOut:
     """Confirm a match you played in.
@@ -199,7 +220,10 @@ def confirm_match(request: HttpRequest, code: MatchCode) -> MatchOut:
 
 
 @router.post(
-    "/{code}/dispute", response=_CHANGE_RESPONSES, operation_id="dispute_match"
+    "/{code}/dispute",
+    response=_CHANGE_RESPONSES,
+    operation_id="dispute_match",
+    openapi_extra=_CHANGE_OPENAPI,
 )
 def dispute_match(request: HttpRequest, code: MatchCode) -> MatchOut:
     """Dispute a match you played in. A moderator then reviews it.

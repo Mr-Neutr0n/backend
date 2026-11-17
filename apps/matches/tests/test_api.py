@@ -518,5 +518,4 @@ def test_confirm_and_dispute_are_documented() -> None:
     for action in ("confirm", "dispute"):
         operation = paths[f"{MATCHES}{{code}}/{action}"]["post"]
         assert operation["operationId"] == f"{action}_match"
-        assert set(operation["responses"]) >= {"200", "401", "404", "409"}
-        assert "403" not in operation["responses"]
+        assert set(operation["responses"]) >= {"200", "401", "403", "404", "409"}
