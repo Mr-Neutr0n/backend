@@ -8,12 +8,14 @@ import re
 from typing import Any
 from urllib.parse import unquote
 
+from django.conf import settings
 from django.core import mail
 from django.test import Client
 
 APP = "/_allauth/app/v1"
 BROWSER = "/_allauth/browser/v1"
-FRONTEND_URL = "http://localhost:8081"
+# The web app origin the email links use, whatever the environment sets.
+FRONTEND_URL: str = settings.FRONTEND_URL
 PASSWORD = "made-up-Passw0rd-for-tests"
 NEW_PASSWORD = "another-made-up-Passw0rd-2"
 
