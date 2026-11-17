@@ -10,7 +10,7 @@ This page tells a maintainer how to set up the domain OPEN sends email from. It 
 
 OPEN sends from a subdomain, not from `openpb.org`. Mailbox providers track sender reputation per domain. If the sending domain ever has a deliverability problem (a bounce spike, spam complaints, a block list entry), it stays on `mail.openpb.org` and does not affect `openpb.org`, which is the project's website. The subdomain also gets its own DMARC policy, so it can be tightened without touching the root domain.
 
-The `openpb.org` DNS zone is on Cloudflare. Before this setup (November 2026), the zone had no MX, SPF, or DMARC record, and none of the records below existed.
+The `openpb.org` DNS zone is on Cloudflare. Before this setup, none of the sending records under `mail.openpb.org` below existed.
 
 ## Resend setup
 
@@ -24,12 +24,16 @@ The `openpb.org` DNS zone is on Cloudflare. Before this setup (November 2026), t
 
 ## DNS records
 
-Add the records in Cloudflare, in the `openpb.org` zone. Cloudflare takes names relative to the zone, so enter the name in the "Cloudflare name" column (for example `send.mail` for `send.mail.openpb.org`).
+Add the records in Cloudflare, in the `openpb.org` zone. Each record has three forms of its name:
+
+- The full name ends in `.openpb.org`, such as `send.mail.openpb.org`. If the dashboard shows a name without it, such as `send.mail`, append `.openpb.org`.
+- The Cloudflare name is the full name minus `.openpb.org`, such as `send.mail`. Cloudflare takes names relative to the zone, so enter this one.
+- The `dig` checks below use the full name.
 
 Add exactly the records the Resend dashboard shows. For the sending records, expect one of two layouts:
 
 - The older layout: an MX record and an SPF TXT record on `send.mail.openpb.org`, as in the table below.
-- The CNAME layout: Resend may give CNAME records for sending instead. Resend says this can happen for domains created after August 2026, which includes `mail.openpb.org`. Add each CNAME with the name and target the dashboard shows. With CNAMEs, add no MX or TXT record at the same name: a CNAME cannot share its name with any other record. Each CNAME verifies on its own, so the domain can show `partially_verified` until all of them resolve. Resend says a partially verified domain can still send, but without a fallback sending server, so wait until every CNAME verifies before production use.
+- The CNAME layout: Resend may give CNAME records for sending instead. Resend says this can happen for domains created after August 2026, which includes `mail.openpb.org`. Add each CNAME with the target the dashboard shows, under its Cloudflare name (see the name forms above). With CNAMEs, add no MX or TXT record at the same name: a CNAME cannot share its name with any other record. Each CNAME verifies on its own, so the domain can show `partially_verified` until all of them resolve. Resend says a partially verified domain can still send, but without a fallback sending server, so wait until every CNAME verifies before production use.
 
 Every record must be DNS only. Cloudflare never proxies MX or TXT records. It proxies a new CNAME by default, and a proxied CNAME never verifies, so set every CNAME to DNS only (grey cloud) when you add it.
 
@@ -58,7 +62,7 @@ DMARC passes when SPF or DKIM passes and is aligned with the From domain, `mail.
 
 ### The report mailbox
 
-DMARC reports are sent by email to `dmarc@openpb.org`, so that address must receive mail before the DMARC record is published. Before this setup (November 2026), `openpb.org` had no MX record, so set up receiving first. Cloudflare Email Routing is one way: turn it on for `openpb.org` and forward `dmarc@openpb.org` to a maintainer's mailbox. Cloudflare adds the MX and SPF records it needs on `openpb.org` itself. Those records do not affect the sending records above.
+DMARC reports are sent by email to `dmarc@openpb.org`, so that address must receive mail before the DMARC record is published. Cloudflare Email Routing is on for `openpb.org` and receives its mail. Before publishing the DMARC record, confirm in the Email Routing settings that a route for `dmarc@openpb.org` exists and forwards to a maintainer's mailbox. DNS cannot show a route, so check the settings, not `dig`. If Email Routing is ever off, turn it on first: Cloudflare then adds the MX and SPF records it needs on `openpb.org` itself. Those records do not affect the sending records above.
 
 The report address is on `openpb.org`, the same organizational domain as `mail.openpb.org`. So no external report authorization record (`mail.openpb.org._report._dmarc.openpb.org`) is needed.
 
@@ -70,11 +74,11 @@ The report address is on `openpb.org`, the same organizational domain as `mail.o
 4. Change the record to `v=DMARC1; p=quarantine; rua=mailto:dmarc@openpb.org`. Do not ramp up with `pct`: the successor to RFC 7489 (DMARCbis) removes it, so receivers that follow it ignore `pct` and apply the policy to all mail.
 5. Later, and only if wanted: `p=reject`, after some months at `p=quarantine` with clean reports.
 
-Before this setup, the root domain `openpb.org` had no SPF or DMARC record. This setup does not need one. Adding `v=spf1 -all` and a DMARC record on `openpb.org` would stop others from sending as the root domain, but that is a separate, optional change. If Cloudflare Email Routing is on, keep the SPF record it adds instead of `-all`.
+The root domain `openpb.org` has no DMARC record, and its SPF record comes from Cloudflare Email Routing. This setup does not need a DMARC record there. Adding one on `openpb.org` would stop others from sending as the root domain, but that is a separate, optional change. Keep the SPF record Email Routing adds; do not replace it with `-all`.
 
 ## Verify with dig
 
-Run each command after adding the records. Before setup, each one prints nothing.
+Run each command after adding the records. Before setup, each command for a record under `mail.openpb.org` prints nothing.
 
 For the older layout:
 
@@ -90,13 +94,13 @@ dig +short send.mail.openpb.org TXT
 
 Expected: `"v=spf1 include:amazonses.com ~all"`
 
-For the CNAME layout, run this for each CNAME name the dashboard shows, written in full, such as `<name>.mail.openpb.org`:
+For the CNAME layout, run this for each CNAME the dashboard shows, with its full name (see the name forms in [DNS records](#dns-records)):
 
 ```bash
-dig +short <name>.mail.openpb.org CNAME
+dig +short <full name> CNAME
 ```
 
-Expected: the target the dashboard shows for that name, with a trailing dot. Empty output means the record is missing or proxied: a proxied CNAME returns no CNAME answer. To tell them apart, run `dig +short <name>.mail.openpb.org` (no type). If that returns addresses, the record is proxied: switch it to DNS only.
+Expected: the target the dashboard shows for that name, with a trailing dot. Empty output means the record is missing or proxied: a proxied CNAME returns no CNAME answer. To tell them apart, run `dig +short <full name>` (no type). If that returns addresses, the record is proxied: switch it to DNS only.
 
 For the DKIM record (if it is a CNAME, use `dig +short resend._domainkey.mail.openpb.org CNAME` and expect the dashboard's target):
 
@@ -116,7 +120,7 @@ Expected: `"v=DMARC1; p=none; rua=mailto:dmarc@openpb.org"`
 dig +short openpb.org MX
 ```
 
-Expected after Cloudflare Email Routing is on: Cloudflare's MX hosts (`route1.mx.cloudflare.net.` and others). This is for the report mailbox, not for sending.
+Expected while Cloudflare Email Routing is on: three Cloudflare MX hosts with their priorities, such as `11 route1.mx.cloudflare.net.`, plus `route2` and `route3`. This is for the report mailbox, not for sending.
 
 ## App settings
 
