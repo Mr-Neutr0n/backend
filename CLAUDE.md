@@ -24,7 +24,7 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - Postgres (psycopg 3), Valkey as cache and Celery broker (decision Q11)
 - Celery with django-celery-beat; queues `default`, `ratings`, `email`, `webhooks`
 - Settings from environment variables via django-environ; `.env.example` holds placeholders only
-- pytest, pytest-django, pytest-cov, factory_boy; ruff, mypy with django-stubs, pre-commit
+- pytest, pytest-django, pytest-cov, pytest-xdist, factory_boy; ruff, mypy with django-stubs, pre-commit
 - gunicorn serves the app (`gunicorn.conf.py`), WhiteNoise serves static files, django-cors-headers handles CORS
 - django-oauth-toolkit 3.4 for partner OAuth2 (decisions Q2, Q3), with local type stubs in `typings/oauth2_provider` (`mypy_path`)
 - Deployed on DigitalOcean App Platform (M3)
@@ -136,7 +136,7 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 
 - `config/settings.py` reads its deployment values from the environment (and an optional `.env`). Read a new variable with the helpers there (`_raw`, `_required`, `_list`), not django-environ's `Env` getters: those treat a value starting with `$` as a reference to another variable, which silently swaps secrets and URLs.
 - The errors that `config/settings.py` raises for a bad or missing variable name the variable and never echo its value. django-environ's own `.env` reader is the exception: it logs a malformed `.env` line in full.
-- With DEBUG off, settings turn on the https redirect, secure cookies, and HSTS (see ADR 0004). The test run applies a fixed set of overrides (the list is `_TEST_OVERRIDES` in `config/test_runner.py`), so tests run over plain http, run Celery tasks eagerly with errors propagated, and need no cache server, no broker, and no `collectstatic`. pytest gets these overrides from `config/settings_test.py`, and `manage.py test` gets them from `config/test_runner.py`. Keep the two sets identical (a test fails if they drift). pytest's set lives in the settings module, so every process that loads it, parallel workers included, gets it; the runner applies its set in spawned parallel workers through `process_setup` (forked workers inherit it).
+- With DEBUG off, settings turn on the https redirect, secure cookies, and HSTS (see ADR 0004). The test run applies a fixed set of overrides (the list is `_TEST_OVERRIDES` in `config/test_runner.py`), so tests run over plain http, run Celery tasks eagerly with errors propagated, hash passwords with fast MD5 (the production hashers stay listed after it), and need no cache server, no broker, and no `collectstatic`. pytest gets these overrides from `config/settings_test.py`, and `manage.py test` gets them from `config/test_runner.py`. Keep the two sets identical (a test fails if they drift). pytest's set lives in the settings module, so every process that loads it, parallel workers included, gets it; the runner applies its set in spawned parallel workers through `process_setup` (forked workers inherit it).
 - `REDIS_URL` takes only the form `redis://[USER:PASSWORD@]HOST[:PORT][/DB]`, or `rediss://` for TLS: a lowercase scheme, a numeric database, and no query string or fragment. Settings refuse at startup a URL that breaks these rules. redis-py lets a query string override settings, certificate verification included, so set connection and TLS options in settings, never in the URL. Percent-encode any URL-reserved character in the password.
 - Celery's broker is `REDIS_URL`, the same Valkey database as the cache, so clearing the cache (`RedisCache.clear()` runs FLUSHDB) also drops queued tasks. Settings refuse to start when `CELERY_BROKER_URL`, `CELERY_BROKER_READ_URL`, `CELERY_BROKER_WRITE_URL`, or `CELERY_RESULT_BACKEND` is set to a non-empty value in the environment (or `.env`): Celery would read it ahead of settings and skip the `REDIS_URL` checks. Set broker and TLS options in settings.
 - Celery has four queues: `default`, `ratings`, `email`, and `webhooks` (ADR 0006). `CELERY_TASK_ROUTES` routes a task by the start of its name: tasks in `apps.ratings.tasks`, `apps.emails.tasks`, and `apps.webhooks.tasks` go to the matching queue, and every other task goes to `default`. A task given an explicit name outside its module's pattern goes to `default`. Sending to a queue that is not declared raises `QueueNotFound`. A new queue needs a declaration, a route, and the `-Q` list of every worker command (compose, docs, deploy).
@@ -167,6 +167,7 @@ uv run gunicorn                           # serve with gunicorn.conf.py (PORT, W
 docker compose --profile web up -d --wait # optional: the app, a worker, and beat in containers, instead of on the host (beat waits for migrate)
 docker compose down -v                    # stop and delete local data
 uv run pytest                             # tests with coverage (Postgres, not SQLite)
+uv run pytest -n auto                     # the same in parallel, one worker per CPU, as CI runs it
 uv run pytest --no-cov apps/accounts      # part of the suite, without the coverage floor
 uv run ruff check . && uv run ruff format --check .
 uv run mypy .                             # strict; needs the settings variables
@@ -174,7 +175,7 @@ uv run python manage.py makemigrations --check --dry-run   # CI fails on missing
 uv run pre-commit run --all-files
 ```
 
-`.github/workflows/ci.yml` runs on every pull request and every push to `main`, in three jobs: `lint` (`ruff check`, `ruff format --check`, and the pre-commit hygiene hooks), `types` (`mypy .`), and `test` (`manage.py check`, `makemigrations --check --dry-run`, and `pytest` with the coverage floor, against a Postgres service). The job names are meant to be required status checks on `main` alongside `sign-off`, so a change that renames a job must also update the `main` ruleset.
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`, in three jobs: `lint` (`ruff check`, `ruff format --check`, and the pre-commit hygiene hooks), `types` (`mypy .`), and `test` (`manage.py check`, `makemigrations --check --dry-run`, and `pytest -n auto` with the coverage floor, against a Postgres service). The job names are meant to be required status checks on `main` alongside `sign-off`, so a change that renames a job must also update the `main` ruleset.
 
 ## Documentation
 

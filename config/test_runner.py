@@ -1,14 +1,14 @@
 """Test runner for `manage.py test`.
 
 It serves the suite over plain http, swaps the cache for an in-memory
-one, runs Celery tasks eagerly, and stores static files without the
-collectstatic manifest, so the tests need no cache server, broker, or
+one, runs Celery tasks eagerly, stores static files without the
+collectstatic manifest, and hashes passwords with a fast hasher, so the tests need no cache server, broker, or
 collectstatic step.
 """
 
 from typing import Any
 
-from django.conf import settings
+from django.conf import global_settings, settings
 from django.test.runner import DiscoverRunner, ParallelTestSuite
 from django.test.utils import override_settings
 
@@ -18,6 +18,8 @@ from django.test.utils import override_settings
 # Settings point Celery at a Valkey broker. Tests run tasks eagerly.
 # Settings store static files with hashed names from a manifest that
 # collectstatic writes. Tests use the plain storage instead.
+# Settings hash passwords with production-strength PBKDF2. Tests hash with
+# fast MD5 first and keep the defaults, so identify_hasher still knows them.
 _TEST_OVERRIDES: dict[str, Any] = {
     "SECURE_SSL_REDIRECT": False,
     "CACHES": {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
@@ -29,6 +31,10 @@ _TEST_OVERRIDES: dict[str, Any] = {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
         },
     },
+    "PASSWORD_HASHERS": [
+        "django.contrib.auth.hashers.MD5PasswordHasher",
+        *global_settings.PASSWORD_HASHERS,
+    ],
 }
 
 

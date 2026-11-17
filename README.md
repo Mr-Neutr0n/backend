@@ -63,7 +63,7 @@ Migrations and tests need the Postgres that `DATABASE_URL` points to. `compose.y
 
 ### Tests
 
-`uv run pytest` reports coverage and fails if it drops below the floor set in `pyproject.toml`. That floor counts all of `apps` and `config`, so when you run only some tests (one file, or `-k`), add `--no-cov`.
+`uv run pytest` reports coverage and fails if it drops below the floor set in `pyproject.toml`. That floor counts all of `apps` and `config`, so when you run only some tests (one file, or `-k`), add `--no-cov`. Add `-n auto` to run the tests in parallel, one worker per CPU, as CI does. Each worker creates its own test database.
 
 ### Background tasks
 

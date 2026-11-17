@@ -90,4 +90,6 @@ jobs:
       - run: uv run python manage.py check
       - run: uv run python manage.py makemigrations --check --dry-run
       # Default addopts include --cov, so the coverage floor is enforced.
-      - run: uv run pytest
+      # -n auto runs one pytest-xdist worker per CPU, each with its own
+      # test database; pytest-cov combines their coverage.
+      - run: uv run pytest -n auto
