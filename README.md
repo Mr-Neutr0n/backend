@@ -110,7 +110,7 @@ CI runs lint, types, and tests on every pull request. The test job also runs `ma
 
 Requests never send email. Each message is stored in the email outbox and sent by a Celery task on the `email` queue after the transaction commits (ADR 0016), so run a worker to see it. With `DJANGO_DEBUG` on and `EMAIL_BACKEND` empty, the worker prints every message to its console. With `DJANGO_DEBUG` off, `EMAIL_BACKEND` and `DEFAULT_FROM_EMAIL` are required, and backends that print or keep messages are refused.
 
-Staging and production send through Resend with django-anymail: set `EMAIL_BACKEND=anymail.backends.resend.EmailBackend` and `RESEND_API_KEY`. To switch to Amazon SES, run `uv add "django-anymail[amazon-ses]"`, set `EMAIL_BACKEND=anymail.backends.amazon_ses.EmailBackend`, and set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` in the environment. No code changes.
+Staging and production send through Resend with django-anymail: set `EMAIL_BACKEND=anymail.backends.resend.EmailBackend` and `RESEND_API_KEY`. To switch to Amazon SES, run `uv add "django-anymail[amazon-ses]"`, set `EMAIL_BACKEND=anymail.backends.amazon_ses.EmailBackend`, and set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` in the environment. The SES backend uses boto3, which ignores `ANYMAIL_REQUESTS_TIMEOUT`, so also add boto3 timeouts under the send task's 60-second soft time limit in settings: `ANYMAIL["AMAZON_SES_CLIENT_PARAMS"] = {"config": Config(connect_timeout=5, read_timeout=20, retries={"max_attempts": 1})}`, with `Config` from `botocore.config`. Nothing else in the code changes.
 
 ## Test data
 
