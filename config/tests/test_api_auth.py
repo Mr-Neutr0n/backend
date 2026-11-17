@@ -22,6 +22,7 @@ from apps.accounts.tests.headless import (
     browser_client,
     csrf_header,
     login,
+    run_on_commit_after_each_request,
     signup,
     verify_from_last_mail,
 )
@@ -44,6 +45,12 @@ def _clear_rate_limits() -> Iterator[None]:
     cache.clear()
     yield
     cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _commit_after_each_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Send queued email when each request returns, as a commit would."""
+    run_on_commit_after_each_request(monkeypatch)
 
 
 def _verified() -> None:

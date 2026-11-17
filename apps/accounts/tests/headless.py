@@ -8,9 +8,12 @@ import re
 from typing import Any
 from urllib.parse import unquote
 
+import pytest
 from django.conf import settings
 from django.core import mail
-from django.test import Client
+from django.http import HttpResponseBase
+from django.test import Client, TestCase
+from django.test.client import ClientHandler
 
 APP = "/_allauth/app/v1"
 BROWSER = "/_allauth/browser/v1"
@@ -81,3 +84,22 @@ def browser_client() -> Client:
 
 def csrf_header(client: Client) -> dict[str, str]:
     return {"X-CSRFToken": client.cookies["csrftoken"].value}
+
+
+def run_on_commit_after_each_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the on_commit callbacks a test client request registers.
+
+    In production a request's transactions commit before the response,
+    and the queued email task then sends the message (ADR 0016). A test
+    runs inside one transaction that never commits, so this runs each
+    request's callbacks when it returns, as a commit would. Mail then
+    reaches ``mail.outbox`` when the response comes back, as before.
+    """
+    original = ClientHandler.__call__
+
+    def call(self: ClientHandler, environ: dict[str, Any]) -> HttpResponseBase:
+        with TestCase.captureOnCommitCallbacks(execute=True):
+            response: HttpResponseBase = original(self, environ)
+        return response
+
+    monkeypatch.setattr(ClientHandler, "__call__", call)

@@ -162,6 +162,9 @@ addopts = ["--cov", "--cov-report=term-missing"]
 # WhiteNoise warns when STATIC_ROOT does not exist. Tests serve static
 # files without collectstatic, so the directory is usually missing.
 filterwarnings = ["ignore:No directory at:UserWarning"]
+markers = [
+    "hold_on_commit: keep on_commit callbacks a test client request registers, instead of running them when the request returns (apps/accounts/tests)",
+]
 
 [tool.coverage.run]
 source = ["apps", "config"]
