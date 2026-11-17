@@ -27,6 +27,10 @@ it. A repeated external id always names it.
 A `MatchPermissionDenied` returns 403 with code "forbidden", fixed text,
 and no items. It never says which rule failed.
 
+A request that an operation's `auth` does not authenticate (ninja's
+`AuthenticationError`, see `config/auth.py`) returns 401 with code
+"unauthorized", fixed text, and no items.
+
 These handlers do not see a wrong method on a known path (ninja answers with
 a plain-text 405) or a path that matches no operation (Django's 404 page).
 Unexpected exceptions keep ninja's default handler, which re-raises when
@@ -38,12 +42,14 @@ from typing import Any
 
 from django.http import Http404, HttpRequest, HttpResponse
 from ninja import NinjaAPI, Schema
-from ninja.errors import HttpError, ValidationError
+from ninja.errors import AuthenticationError, HttpError, ValidationError
 
 from apps.matches.permissions import MatchPermissionDenied
 from apps.matches.services import DuplicateKind, DuplicateMatchError
 
 VALIDATION_ERROR_STATUS = 422
+UNAUTHORIZED_STATUS = 401
+UNAUTHORIZED_MESSAGE = "Authentication required."
 DUPLICATE_MATCH_STATUS = 409
 FORBIDDEN_STATUS = 403
 
@@ -131,6 +137,16 @@ def install_error_handlers(api: NinjaAPI) -> None:
             errors=[],
         )
         return _respond(api, request, exc.status_code, body)
+
+    @api.exception_handler(AuthenticationError)
+    def on_authentication_error(
+        request: HttpRequest, exc: AuthenticationError
+    ) -> HttpResponse:
+        # Fixed text: never which credential was missing or why it failed.
+        body = ErrorResponse(
+            code="unauthorized", message=UNAUTHORIZED_MESSAGE, errors=[]
+        )
+        return _respond(api, request, UNAUTHORIZED_STATUS, body)
 
     @api.exception_handler(Http404)
     def on_not_found(request: HttpRequest, exc: Http404) -> HttpResponse:

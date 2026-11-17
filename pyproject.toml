@@ -104,11 +104,13 @@ module = ["allauth", "allauth.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# OPEN's allauth adapters and backend subclass allauth's untyped classes.
+# OPEN's allauth adapters, backend, and API auth subclass allauth's
+# untyped classes.
 module = [
     "apps.accounts.adapter",
     "apps.accounts.auth_backends",
     "apps.accounts.headless_adapter",
+    "config.auth",
 ]
 disallow_subclassing_any = false
 
