@@ -64,15 +64,21 @@ def is_canonical_email(email: str) -> bool:
     """Return whether an address is already in its stored form, give or take
     case and surrounding whitespace.
 
-    It is canonical when stripping and lowercasing it gives the same value
-    as full normalization (so NFKC changes nothing, as it would for U+017F
-    long s or fullwidth letters), and that value passes every rule. Only a
-    canonical address may identify an existing Account (login, password
-    reset): a variant that NFKC folds onto an Account's address is a
-    different string, not that Account's login.
+    It is canonical when it is ASCII once stripped, stripping and
+    lowercasing it gives the same value as full normalization (so NFKC
+    changes nothing, as it would for U+017F long s or fullwidth letters),
+    and that value passes every rule. Only a canonical address may identify
+    an existing Account (login, password reset): a variant that NFKC or
+    lowercasing folds onto an Account's address is a different string, not
+    that Account's login.
     """
+    stripped = email.strip()
+    # Stored addresses are ASCII. Checking the input too refuses U+212A
+    # KELVIN SIGN, whose lowercase is an ASCII "k".
+    if not stripped.isascii():
+        return False
     normalized = normalize_email_address(email)
-    lowered = "".join(c.lower() for c in email.strip())
+    lowered = "".join(c.lower() for c in stripped)
     return lowered == normalized and not normalized_email_errors(normalized)
 
 
