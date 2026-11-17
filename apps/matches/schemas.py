@@ -10,11 +10,14 @@ No schema here carries a row id, the submitter, a flag, or any personal
 field other than a display name.
 """
 
+from collections.abc import Callable
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from django.db.models import Prefetch, QuerySet
 from ninja import Schema
+from pydantic import BeforeValidator, Field
+from pydantic_core import PydanticCustomError
 
 from apps.matches.models import (
     BestOf,
@@ -33,6 +36,39 @@ if TYPE_CHECKING:
 
 PRIVATE_PLAYER_NAME = "Private player"
 
+# Generous caps, well above what ``validate_match`` allows, so an ordinary
+# mistake still gets its message. They only stop a huge body from making
+# the view normalize and look up thousands of codes.
+MAX_TEAM_ENTRIES = 10
+MAX_GAME_ENTRIES = 20
+
+
+def _at_most(limit: int, message: str) -> Callable[[object], object]:
+    """A check that refuses a list longer than ``limit`` with fixed text.
+
+    It runs before the items are parsed. Pydantic's own ``too_long``
+    message names the list's length, which the client sent, so it is
+    replaced.
+    """
+
+    def check(value: object) -> object:
+        if isinstance(value, list | tuple) and len(value) > limit:
+            raise PydanticCustomError("too_long", message)
+        return value
+
+    return check
+
+
+TeamCodes = Annotated[
+    list[str],
+    BeforeValidator(
+        _at_most(
+            MAX_TEAM_ENTRIES, f"Enter at most {MAX_TEAM_ENTRIES} players for a team."
+        )
+    ),
+    Field(json_schema_extra={"maxItems": MAX_TEAM_ENTRIES}),
+]
+
 
 class GameScoreIn(Schema):
     """One game's score: the points each team won."""
@@ -41,20 +77,30 @@ class GameScoreIn(Schema):
     team_b: int
 
 
+GameScores = Annotated[
+    list[GameScoreIn],
+    BeforeValidator(
+        _at_most(MAX_GAME_ENTRIES, f"Enter at most {MAX_GAME_ENTRIES} games.")
+    ),
+    Field(json_schema_extra={"maxItems": MAX_GAME_ENTRIES}),
+]
+
+
 class MatchCreateIn(Schema):
     """A player's own match submission.
 
     The field names are ``validate_match``'s argument names, so its issues
     name the request fields. A missing game target means 11, a missing
     scoring type means side-out, and a missing best-of is inferred from
-    the games.
+    the games. Each team takes at most ``MAX_TEAM_ENTRIES`` codes and the
+    games at most ``MAX_GAME_ENTRIES`` scores.
     """
 
     format: MatchFormat
     played_on: date
-    team_a: list[str]
-    team_b: list[str]
-    games: list[GameScoreIn]
+    team_a: TeamCodes
+    team_b: TeamCodes
+    games: GameScores
     best_of: BestOf | None = None
     scoring_type: ScoringType | None = None
     game_target: GameTarget | None = None
