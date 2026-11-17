@@ -527,15 +527,17 @@ MATCH_CONFIRMATION_EXPIRY_DAYS = _positive_days("MATCH_CONFIRMATION_EXPIRY_DAYS"
 # Accounts (django-allauth)
 # https://docs.allauth.org/en/latest/account/configuration.html
 
-# Django tries these in order. ModelBackend comes first and authenticates
-# every successful login, the Django admin's and allauth's headless login
-# alike: it finds the Account with the manager's get_by_natural_key
-# (ADR 0003). OPEN's allauth backend runs only when ModelBackend finds no
-# Account to log in. It looks Accounts up the same way, never through an
-# EmailAddress row, and stashes an inactive Account whose password matched,
-# so allauth answers "inactive" instead of "wrong password". Both check
-# is_active. A headless login still goes through allauth's login flow,
-# which enforces email verification.
+# For an allauth login, OPEN's account adapter first refuses an address
+# that is not canonical (a variant NFKC folds onto an Account's address),
+# before either backend runs. Django then tries these in order. ModelBackend
+# comes first and authenticates every successful login, the Django admin's
+# and allauth's headless login alike: it finds the Account with the
+# manager's get_by_natural_key (ADR 0003). OPEN's allauth backend runs only
+# when ModelBackend finds no Account to log in. It looks Accounts up the
+# same way, never through an EmailAddress row, and stashes an inactive
+# Account whose password matched, so allauth answers "inactive" instead of
+# "wrong password". Both check is_active. A headless login still goes
+# through allauth's login flow, which enforces email verification.
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
     "apps.accounts.auth_backends.AuthenticationBackend",
