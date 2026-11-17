@@ -1,0 +1,9 @@
+{% extends "emails/base_message.txt" %}
+{% block content %}{% if matches|length == 1 %}A match you played in was submitted to OPEN and is waiting for your confirmation.{% else %}Matches you played in were submitted to OPEN and are waiting for your confirmation.{% endif %} A match counts only once it is confirmed. Scores show your team first.
+{% for match in matches %}
+Match {{ match.code }}, played {{ match.played_on|date:"F j, Y" }}
+Scores: {{ match.scores }}
+Confirm or dispute: {{ match.url }}
+{% endfor %}
+If a score is wrong, or you did not play in a match, dispute it from its page. The page also shows the match's details.{% endblock content %}
+{% block reason %}You received this email because you played in a match that was submitted to OPEN and is waiting for your confirmation.{% endblock reason %}

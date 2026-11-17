@@ -1,0 +1,16 @@
+{% extends "emails/base_message.html" %}
+{% block title %}{% if matches|length == 1 %}A match is waiting for your confirmation on OPEN{% else %}Matches waiting for your confirmation on OPEN{% endif %}{% endblock title %}
+{% block content %}
+<p style="margin: 0 0 16px;">{% if matches|length == 1 %}A match you played in was submitted to OPEN and is waiting for your confirmation.{% else %}Matches you played in were submitted to OPEN and are waiting for your confirmation.{% endif %} A match counts only once it is confirmed. Scores show your team first.</p>
+{% for match in matches %}
+<div style="margin: 0 0 16px; padding: 12px 16px; border: 1px solid #dddddd; border-radius: 4px;">
+<p style="margin: 0 0 4px; font-weight: bold;">Match {{ match.code }}</p>
+<p style="margin: 0 0 4px;">Played {{ match.played_on|date:"F j, Y" }}</p>
+<p style="margin: 0 0 8px;">Scores: {{ match.scores }}</p>
+<p style="margin: 0;"><a href="{{ match.url }}" style="color: #1a5c38; font-weight: bold;">Confirm or dispute</a></p>
+<p style="margin: 4px 0 0; font-size: 14px; color: #555555;"><span style="word-break: break-all;">{{ match.url }}</span></p>
+</div>
+{% endfor %}
+<p style="margin: 0;">If a score is wrong, or you did not play in a match, dispute it from its page. The page also shows the match's details.</p>
+{% endblock content %}
+{% block reason %}You received this email because you played in a match that was submitted to OPEN and is waiting for your confirmation.{% endblock reason %}
