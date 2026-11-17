@@ -16,21 +16,21 @@ The `openpb.org` DNS zone is on Cloudflare. Before this setup, none of the sendi
 
 1. In the Resend dashboard, add the domain `mail.openpb.org`.
 2. Pick the region. The default is `us-east-1` (North Virginia). The others are `eu-west-1`, `sa-east-1`, and `ap-northeast-1`. The region sets the bounce host in the records, so pick it before you add them.
-3. Resend shows the records for the domain in its Records tab. Add exactly those records in Cloudflare, as described in [DNS records](#dns-records). Resend may show CNAME records for sending instead of the MX and TXT pair. Where the dashboard and this page differ, the dashboard is right: update this page.
+3. Resend shows the records for the domain in its Records tab. Add exactly those records in Cloudflare, as described in [DNS records](#dns-records). Resend may show CNAME records for sending instead of the MX and TXT pair. For the sending records and DKIM, where the dashboard and this page differ, the dashboard is right: update this page. The DMARC record is the exception: always use this page's value, with `rua=mailto:dmarc@openpb.org`, even if the dashboard suggests another.
 4. Set up the DMARC report mailbox (see [The report mailbox](#the-report-mailbox)), then add the DMARC record.
 5. In the Resend dashboard, verify the domain. DNS changes can take a few minutes to a few hours to show up. Use [Verify with dig](#verify-with-dig) to check them yourself.
-6. Keep open tracking and click tracking off for `mail.openpb.org`, and add no tracking subdomain CNAME. Click tracking rewrites every link through Resend's tracking host, including the verification and reset links that carry keys. Both kinds of tracking also report player behavior to a third party (ADR 0009).
+6. Keep open tracking and click tracking off for `mail.openpb.org`, and add no tracking subdomain CNAME. Click tracking rewrites every link through Resend's tracking host, including the verification and reset links that carry keys. Both kinds of tracking also report player behavior to a third party. The Resend row of `docs/privacy/personal-data-inventory.md` requires both to stay off.
 7. Create an API key with sending access only, limited to `mail.openpb.org`. Store it only in the deploy environment (see [App settings](#app-settings)). Never commit it, paste it in an issue, or put it in `.env.example`.
 
 ## DNS records
 
 Add the records in Cloudflare, in the `openpb.org` zone. Each record has three forms of its name:
 
-- The full name ends in `.openpb.org`, such as `send.mail.openpb.org`. If the dashboard shows a name without it, such as `send.mail`, append `.openpb.org`.
+- The full name of every record here ends in `.mail.openpb.org`, such as `send.mail.openpb.org`. The dashboard may show a name relative to `openpb.org` (such as `send.mail`) or relative to `mail.openpb.org` (such as `send`). Complete it so it ends in `.mail.openpb.org`: `send.mail` and `send` both become `send.mail.openpb.org`. A completed name that does not end in `.mail.openpb.org`, such as `send.openpb.org`, is wrong.
 - The Cloudflare name is the full name minus `.openpb.org`, such as `send.mail`. Cloudflare takes names relative to the zone, so enter this one.
 - The `dig` checks below use the full name.
 
-Add exactly the records the Resend dashboard shows. For the sending records, expect one of two layouts:
+Add exactly the sending and DKIM records the Resend dashboard shows. The DMARC record always uses the value in the table below, even if the dashboard suggests another (for example one with no `rua`), because the rollout needs the reports. For the sending records, expect one of two layouts:
 
 - The older layout: an MX record and an SPF TXT record on `send.mail.openpb.org`, as in the table below.
 - The CNAME layout: Resend may give CNAME records for sending instead. Resend says this can happen for domains created after August 2026, which includes `mail.openpb.org`. Add each CNAME with the target the dashboard shows, under its Cloudflare name (see the name forms above). With CNAMEs, add no MX or TXT record at the same name: a CNAME cannot share its name with any other record. Each CNAME verifies on its own, so the domain can show `partially_verified` until all of them resolve. Resend says a partially verified domain can still send, but without a fallback sending server, so wait until every CNAME verifies before production use.
@@ -74,7 +74,7 @@ The report address is on `openpb.org`, the same organizational domain as `mail.o
 4. Change the record to `v=DMARC1; p=quarantine; rua=mailto:dmarc@openpb.org`. Do not ramp up with `pct`: the successor to RFC 7489 (DMARCbis) removes it, so receivers that follow it ignore `pct` and apply the policy to all mail.
 5. Later, and only if wanted: `p=reject`, after some months at `p=quarantine` with clean reports.
 
-The root domain `openpb.org` has no DMARC record, and its SPF record comes from Cloudflare Email Routing. This setup does not need a DMARC record there. Adding one on `openpb.org` would stop others from sending as the root domain, but that is a separate, optional change. Keep the SPF record Email Routing adds; do not replace it with `-all`.
+The root domain `openpb.org` has no DMARC record, and its SPF record comes from Cloudflare Email Routing. This setup does not need a DMARC record there. A DMARC record on `openpb.org` would stop others from sending as the root domain only with an enforcing policy (`p=quarantine` or `p=reject`), not with `p=none`. That is a separate, optional change. Keep the SPF record Email Routing adds; do not replace it with `-all`.
 
 ## Verify with dig
 
