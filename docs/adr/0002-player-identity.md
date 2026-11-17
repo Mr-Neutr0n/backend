@@ -59,7 +59,7 @@ No unclaimed players exist, so there is no minimum data set for one. Personal da
 - #93's "Unclaimed players" rule becomes: only the player sets birth year, birth month, gender, and legal name, on their own Player.
 - #93's question about unknown ages for unclaimed players does not arise.
 - #93's "private by default" rule for players aged 13 to 17 applies only to the other profile details. Their name and current Ratings stay visible to signed-in Accounts.
-- The "Private player" label in #31 and #56 no longer applies to a player's name. Those issues need rewording.
+- The "Private player" label in #31 and #56 no longer applies to a player's name. Those issues need rewording. ADR 0015 keeps the label only for a Player whose Account is inactive.
 - Mentions of opted-out players in #19, #53, #83, #85, #96, and #124 no longer apply. #124's "Private and opted-out profiles return 404 to the public" no longer applies: no profile can hide its name and Ratings, and none is opted out.
 - #116's retention for unclaimed records has nothing to act on.
 - An open question for #116: can new Matches still name a Player whose Account was deleted, through its OPEN Code or a #82 mapping? This record does not decide it.

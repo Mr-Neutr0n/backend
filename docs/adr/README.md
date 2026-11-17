@@ -62,3 +62,4 @@ Add each record here when it merges.
 - [0012. Match submission permissions](0012-match-submission-permissions.md) (issue #79)
 - [0013. Match confirmation and changes](0013-match-confirmation-and-changes.md) (issue #26)
 - [0014. Headless account authentication](0014-headless-account-authentication.md) (issue #30)
+- [0015. First-party match endpoints](0015-first-party-match-endpoints.md) (issue #31)
