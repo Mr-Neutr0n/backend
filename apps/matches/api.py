@@ -18,18 +18,20 @@ No rule reads payment status: every player may submit and confirm every
 match (hard rule 7).
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.http import HttpRequest
 from ninja import Router, Status
 
+from apps.matches import workflow
 from apps.matches.models import Match
 from apps.matches.permissions import MatchPermissionDenied
 from apps.matches.schemas import MatchCreateIn, MatchOut, match_out, with_match_details
 from apps.matches.services import MatchIssue, MatchValidationError, record_match
 from apps.players.models import Player
+from apps.public_ids.api import PublicCodePath, get_by_public_code
 from apps.public_ids.codes import CodeType, normalize
 from config.api_errors import ErrorResponse
 from config.auth import account_auth
@@ -38,6 +40,8 @@ if TYPE_CHECKING:
     from django.contrib.auth.models import _User
 
 router = Router(tags=["matches"], auth=account_auth)
+
+MatchCode = Annotated[str, PublicCodePath(CodeType.MATCH)]
 
 UNKNOWN_PLAYER_MESSAGE = "No player has this OPEN Code."
 
@@ -158,3 +162,44 @@ def create_match(request: HttpRequest, payload: MatchCreateIn) -> Status[MatchOu
     except MatchValidationError as error:
         raise _in_body(error) from None
     return Status(201, match_out(_loaded(recorded.match), account))
+
+
+_CHANGE_RESPONSES = {
+    200: MatchOut,
+    403: ErrorResponse,
+    404: ErrorResponse,
+    409: ErrorResponse,
+}
+
+
+@router.post(
+    "/{code}/confirm", response=_CHANGE_RESPONSES, operation_id="confirm_match"
+)
+def confirm_match(request: HttpRequest, code: MatchCode) -> MatchOut:
+    """Confirm a match you played in.
+
+    A pending match becomes confirmed once a player on each team confirms
+    it. Confirming again changes nothing. A disputed or voided match
+    cannot be confirmed (409).
+    """
+    account = request_account(request)
+    match = get_by_public_code(Match.objects.all(), code)
+    with transaction.atomic():
+        workflow.confirm_match(match, actor=account)
+    return match_out(_loaded(match), account)
+
+
+@router.post(
+    "/{code}/dispute", response=_CHANGE_RESPONSES, operation_id="dispute_match"
+)
+def dispute_match(request: HttpRequest, code: MatchCode) -> MatchOut:
+    """Dispute a match you played in. A moderator then reviews it.
+
+    Disputing again changes nothing. A voided match cannot be disputed
+    (409).
+    """
+    account = request_account(request)
+    match = get_by_public_code(Match.objects.all(), code)
+    with transaction.atomic():
+        workflow.dispute_match(match, actor=account)
+    return match_out(_loaded(match), account)

@@ -22,6 +22,7 @@ from apps.accounts.tests.headless import (
     verify_from_last_mail,
 )
 from apps.matches.models import Game, Match, MatchParticipant, MatchStatus, Team
+from apps.matches.workflow import void_match
 from apps.players.models import Player
 from apps.players.tests.factories import PlayerFactory
 from apps.public_ids.codes import CodeType, generate
@@ -354,3 +355,170 @@ def test_create_operation_documents_only_first_party_fields() -> None:
         "game_target",
     }
     assert set(operation["responses"]) >= {"201", "401", "403", "409", "422"}
+
+
+# Confirming and disputing a match.
+
+CHANGE_FORBIDDEN = {
+    "code": "forbidden",
+    "message": "You are not allowed to change this match.",
+    "errors": [],
+}
+CONFLICT = {
+    "code": "conflict",
+    "message": "This match cannot make this change in its current status.",
+    "errors": [],
+}
+
+
+def act(client: Client, match_code: str, action: str) -> Any:
+    return client.post(f"{MATCHES}{match_code}/{action}")
+
+
+def test_both_teams_confirm_a_pending_match(
+    pending: Match, players: list[Player]
+) -> None:
+    first = act(signed_in(players[0].account), pending.public_code, "confirm")
+
+    assert first.status_code == 200
+    assert first.json()["status"] == "pending"
+    assert first.json()["code"] == pending.public_code
+
+    second = act(signed_in(players[3].account), pending.public_code, "confirm")
+
+    assert second.status_code == 200
+    assert second.json()["status"] == "confirmed"
+    assert second.json()["team_a"] == _team(players[:2])
+    pending.refresh_from_db()
+    assert pending.status == MatchStatus.CONFIRMED
+
+
+def test_repeat_confirmation_changes_nothing(
+    confirmed: Match, players: list[Player]
+) -> None:
+    response = act(signed_in(players[0].account), confirmed.public_code, "confirm")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "confirmed"
+
+
+def test_code_is_read_in_any_case(pending: Match, players: list[Player]) -> None:
+    code = pending.public_code.lower()
+
+    response = act(signed_in(players[0].account), code, "confirm")
+
+    assert response.status_code == 200
+    assert response.json()["code"] == pending.public_code
+
+
+@pytest.mark.parametrize("action", ["confirm", "dispute"])
+def test_non_participant_gets_403(
+    pending: Match, players: list[Player], action: str
+) -> None:
+    outsider = PlayerFactory.create()
+
+    response = act(signed_in(outsider.account), pending.public_code, action)
+
+    assert response.status_code == 403
+    assert response.json() == CHANGE_FORBIDDEN
+    pending.refresh_from_db()
+    assert pending.status == MatchStatus.PENDING
+
+
+@pytest.mark.parametrize("action", ["confirm", "dispute"])
+def test_account_without_player_gets_403(pending: Match, action: str) -> None:
+    response = act(signed_in(UserFactory.create()), pending.public_code, action)
+
+    assert response.status_code == 403
+    assert response.json() == CHANGE_FORBIDDEN
+
+
+@pytest.mark.parametrize("action", ["confirm", "dispute"])
+def test_signed_out_gets_401(pending: Match, action: str) -> None:
+    response = act(Client(), pending.public_code, action)
+
+    assert response.status_code == 401
+    assert response.json() == UNAUTHORIZED
+
+
+@pytest.mark.parametrize("action", ["confirm", "dispute"])
+@pytest.mark.parametrize("code", ["not-a-match-code", "M-0000-0000-0000"])
+def test_unknown_or_malformed_code_gets_404(
+    players: list[Player], action: str, code: str
+) -> None:
+    response = act(signed_in(players[0].account), code, action)
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "not_found",
+        "message": "Not found.",
+        "errors": [],
+    }
+
+
+def test_participant_disputes_a_match(confirmed: Match, players: list[Player]) -> None:
+    response = act(signed_in(players[2].account), confirmed.public_code, "dispute")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "disputed"
+    confirmed.refresh_from_db()
+    assert confirmed.status == MatchStatus.DISPUTED
+
+
+def test_repeat_dispute_changes_nothing(pending: Match, players: list[Player]) -> None:
+    client = signed_in(players[2].account)
+    assert act(client, pending.public_code, "dispute").status_code == 200
+
+    response = act(client, pending.public_code, "dispute")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "disputed"
+
+
+def test_confirming_a_disputed_match_gets_409(
+    pending: Match, players: list[Player]
+) -> None:
+    act(signed_in(players[2].account), pending.public_code, "dispute")
+
+    response = act(signed_in(players[0].account), pending.public_code, "confirm")
+
+    assert response.status_code == 409
+    assert response.json() == CONFLICT
+
+
+@pytest.mark.parametrize("action", ["confirm", "dispute"])
+def test_voided_match_gets_409(
+    pending: Match, players: list[Player], moderator: Any, action: str
+) -> None:
+    void_match(pending, actor=moderator, reason="Entered by mistake.")
+
+    response = act(signed_in(players[0].account), pending.public_code, action)
+
+    assert response.status_code == 409
+    assert response.json() == CONFLICT
+    pending.refresh_from_db()
+    assert pending.status == MatchStatus.VOIDED
+
+
+def test_confirm_response_shows_inactive_participant_as_private(
+    pending: Match, players: list[Player]
+) -> None:
+    get_user_model().objects.filter(pk=players[3].account_id).update(is_active=False)
+
+    response = act(signed_in(players[0].account), pending.public_code, "confirm")
+
+    assert response.status_code == 200
+    assert response.json()["team_b"][1] == {
+        "code": None,
+        "display_name": "Private player",
+    }
+    assert players[3].display_name not in response.content.decode()
+
+
+def test_confirm_and_dispute_are_documented() -> None:
+    paths = Client().get("/api/v1/openapi.json").json()["paths"]
+
+    for action in ("confirm", "dispute"):
+        operation = paths[f"{MATCHES}{{code}}/{action}"]["post"]
+        assert operation["operationId"] == f"{action}_match"
+        assert set(operation["responses"]) >= {"200", "401", "403", "404", "409"}
