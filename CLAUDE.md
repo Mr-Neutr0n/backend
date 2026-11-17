@@ -24,7 +24,7 @@ The Django project scaffold exists (`config`, with settings read from the enviro
 - Postgres (psycopg 3), Valkey as cache and Celery broker (decision Q11)
 - Celery with django-celery-beat; queues `default`, `ratings`, `email`, `webhooks`
 - Settings from environment variables via django-environ; `.env.example` holds placeholders only
-- pytest, pytest-django, pytest-cov, factory_boy; ruff, mypy with django-stubs, pre-commit
+- pytest, pytest-django, pytest-cov, pytest-xdist, factory_boy; ruff, mypy with django-stubs, pre-commit
 - gunicorn serves the app (`gunicorn.conf.py`), WhiteNoise serves static files, django-cors-headers handles CORS
 - django-oauth-toolkit 3.4 for partner OAuth2 (decisions Q2, Q3), with local type stubs in `typings/oauth2_provider` (`mypy_path`)
 - Deployed on DigitalOcean App Platform (M3)
@@ -167,6 +167,7 @@ uv run gunicorn                           # serve with gunicorn.conf.py (PORT, W
 docker compose --profile web up -d --wait # optional: the app, a worker, and beat in containers, instead of on the host (beat waits for migrate)
 docker compose down -v                    # stop and delete local data
 uv run pytest                             # tests with coverage (Postgres, not SQLite)
+uv run pytest -n auto                     # the same in parallel, one worker per CPU, as CI runs it
 uv run pytest --no-cov apps/accounts      # part of the suite, without the coverage floor
 uv run ruff check . && uv run ruff format --check .
 uv run mypy .                             # strict; needs the settings variables
@@ -174,7 +175,7 @@ uv run python manage.py makemigrations --check --dry-run   # CI fails on missing
 uv run pre-commit run --all-files
 ```
 
-`.github/workflows/ci.yml` runs on every pull request and every push to `main`, in three jobs: `lint` (`ruff check`, `ruff format --check`, and the pre-commit hygiene hooks), `types` (`mypy .`), and `test` (`manage.py check`, `makemigrations --check --dry-run`, and `pytest` with the coverage floor, against a Postgres service). The job names are meant to be required status checks on `main` alongside `sign-off`, so a change that renames a job must also update the `main` ruleset.
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`, in three jobs: `lint` (`ruff check`, `ruff format --check`, and the pre-commit hygiene hooks), `types` (`mypy .`), and `test` (`manage.py check`, `makemigrations --check --dry-run`, and `pytest -n auto` with the coverage floor, against a Postgres service). The job names are meant to be required status checks on `main` alongside `sign-off`, so a change that renames a job must also update the `main` ruleset.
 
 ## Documentation
 

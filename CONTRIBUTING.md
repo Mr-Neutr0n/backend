@@ -33,7 +33,7 @@ A pull request merges only when these checks pass:
 
 - `lint`: `ruff check`, `ruff format --check`, and the pre-commit hygiene hooks.
 - `types`: `mypy .`.
-- `test`: `manage.py check`, the missing-migrations check, and `pytest` with the coverage floor.
+- `test`: `manage.py check`, the missing-migrations check, and `pytest -n auto` (in parallel) with the coverage floor.
 - `sign-off`: every commit carries a DCO sign-off.
 
 A maintainer reviews and merges every pull request.
@@ -95,6 +95,8 @@ Every change to behavior needs tests that would fail without it. A bug fix needs
 ```bash
 uv run pytest --no-cov apps/accounts
 ```
+
+- `uv run pytest -n auto` runs the suite in parallel with pytest-xdist, one worker per CPU, as CI does. Each worker gets its own test database, so tests must not depend on running in one process or in a set order.
 
 ## Migrations
 
