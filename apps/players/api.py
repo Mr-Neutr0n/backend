@@ -31,6 +31,8 @@ PlayerCode = Annotated[str, PublicCodePath(CodeType.PLAYER)]
 
 HISTORY_PAGE_SIZE = 20
 HISTORY_MAX_PAGE_SIZE = 100
+# Postgres takes a bigint OFFSET: a larger one would fail in the database.
+HISTORY_MAX_OFFSET = 2**63 - 1
 PRIVATE_HISTORY_MESSAGE = "This player's match history is private."
 
 
@@ -43,7 +45,7 @@ class MatchHistoryPagination(LimitOffsetPagination):
 
     class Input(Schema):
         limit: int = Field(HISTORY_PAGE_SIZE, ge=1, le=HISTORY_MAX_PAGE_SIZE)
-        offset: int = Field(0, ge=0)
+        offset: int = Field(0, ge=0, le=HISTORY_MAX_OFFSET)
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(max_limit=HISTORY_MAX_PAGE_SIZE, **kwargs)
