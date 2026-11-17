@@ -24,11 +24,15 @@ class AccountAdapter(DefaultAccountAdapter):
     def clean_email(self, email: str) -> str:
         """Normalize an address, then apply the Account email rules to it.
 
-        allauth calls this for every address it takes in: sign-up, adding or
-        changing an address, and password reset. The address is normalized
-        like the manager does (NFKC, strip, lowercase per character), then
-        checked for ASCII, length, and format, in that order. The error
-        carries the rule's fixed message, never the submitted value.
+        allauth calls this for a new address: at sign-up, and when an
+        Account adds an address (with ACCOUNT_CHANGE_EMAIL, how it changes
+        its address). Login and the password reset request never call it:
+        they check the address with is_canonical_email instead (here in
+        authenticate, and in OPEN's RequestPasswordResetInput in
+        headless_views.py). The address is normalized like the manager does
+        (NFKC, strip, lowercase per character), then checked for ASCII,
+        length, and format, in that order. The error carries the rule's
+        fixed message, never the submitted value.
         """
         normalized = normalize_email_address(email)
         errors = normalized_email_errors(normalized)
