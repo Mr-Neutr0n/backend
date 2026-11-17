@@ -55,12 +55,10 @@ class SessionAuth(NinjaSessionAuth):
         """The signed-in Account itself, not Django's lazy ``request.user``.
 
         ``__call__`` already read ``is_authenticated``, which loaded the
-        Account behind the proxy, so unwrapping it needs no query.
+        Account behind the proxy, so unwrapping it needs no query. It runs
+        only for a signed-in user.
         """
-        user = request.user
-        if not user.is_authenticated:
-            return None
-        return getattr(user, "_wrapped", user)
+        return getattr(request.user, "_wrapped", request.user)
 
 
 account_auth = [SessionTokenAuth(), SessionAuth()]
