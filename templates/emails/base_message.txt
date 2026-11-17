@@ -1,0 +1,7 @@
+{% autoescape off %}OPEN
+
+{% block content %}{% endblock content %}
+
+{% block reason %}{% endblock reason %}
+This is an automated message from OPEN, the Open Pickleball Evaluation Network.
+{% endautoescape %}

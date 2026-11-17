@@ -20,6 +20,7 @@ from django.core.cache import cache
 from django.core.mail import EmailMessage
 from django.template.loader import get_template
 from django.test import Client, RequestFactory
+from pytest_django.fixtures import Settings
 
 from apps.accounts.adapter import AccountAdapter
 from apps.accounts.tests.factories import UserFactory
@@ -175,7 +176,8 @@ def test_queue_email_accepts_the_rendered_message(prefix: str) -> None:
     assert row.to == TO
 
 
-def test_no_address_or_name_from_the_request_in_the_body() -> None:
+def test_no_address_or_name_from_the_request_in_the_body(settings: Settings) -> None:
+    settings.ALLOWED_HOSTS = ["made-up-host.example.org"]
     request = RequestFactory().get("/", HTTP_HOST="made-up-host.example.org")
     ctx: dict[str, Any] = {
         "request": request,

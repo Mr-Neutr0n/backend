@@ -1,0 +1,7 @@
+{% extends "emails/base_message.txt" %}
+{% block content %}Someone tried to sign up for OPEN with this email address, but an OPEN account already uses it. If that was you, log in with this address instead. If you forgot your password, you can reset it here:
+
+{{ password_reset_url }}
+
+If you did not try to sign up, you can ignore this email. Nothing on your account has changed.{% endblock content %}
+{% block reason %}You received this email because someone tried to sign up for OPEN with this email address, and an OPEN account already uses it.{% endblock reason %}

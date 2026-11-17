@@ -227,6 +227,6 @@ def test_signup_with_a_taken_address_looks_like_a_new_signup() -> None:
     # The owner is told an account exists, and gets no verification link.
     assert len(mail.outbox) == 1
     assert mail.outbox[0].to == [EMAIL]
-    assert mail.outbox[0].subject.endswith("Account Already Exists")
+    assert mail.outbox[0].subject == "You already have an OPEN account"
     assert VERIFY_PREFIX not in mail.outbox[0].body
     assert f"{FRONTEND_URL}/account/password/reset" in mail.outbox[0].body
