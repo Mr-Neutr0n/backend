@@ -27,7 +27,12 @@ from apps.accounts.tests.headless import (
     signup,
     verify_from_last_mail,
 )
-from apps.accounts.validators import ASCII_EMAIL_MESSAGE
+from apps.accounts.validators import (
+    ASCII_EMAIL_MESSAGE,
+    EMAIL_LENGTH_MESSAGE,
+    EMAIL_MAX_LENGTH,
+    normalize_email_address,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -81,14 +86,22 @@ def test_signup_refuses_a_non_ascii_address_without_echoing_it(base: str) -> Non
 
 
 def test_signup_refuses_an_address_too_long_once_normalized() -> None:
-    # NFKC turns U+FB00 (one character) into "ff", past the 254 limit.
-    local = "ﬀ" * 60
-    email = f"{local}@{'a' * 63}.{'b' * 63}.example.org"
+    # Django's EmailField accepts U+FB00 in the domain, through IDNA, so the
+    # address reaches clean_email at 137 characters. NFKC turns each U+FB00
+    # into "ff", which makes it 261, past the 254 limit.
+    label = "ﬀ" * 31 + "a"
+    email = f"a@{label}.{label}.{label}.{label}.org"
+    assert len(email) <= EMAIL_MAX_LENGTH < len(normalize_email_address(email))
 
     response = signup(Client(), APP, email)
 
     assert response.status_code == 400
+    errors = response.json()["errors"]
+    assert [(error["param"], error["code"], error["message"]) for error in errors] == [
+        ("email", "email_too_long", EMAIL_LENGTH_MESSAGE)
+    ]
     assert not get_user_model()._default_manager.exists()
+    assert mail.outbox == []
 
 
 def test_clean_email_normalizes() -> None:
