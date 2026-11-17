@@ -63,3 +63,4 @@ Add each record here when it merges.
 - [0013. Match confirmation and changes](0013-match-confirmation-and-changes.md) (issue #26)
 - [0014. Headless account authentication](0014-headless-account-authentication.md) (issue #30)
 - [0015. First-party match endpoints](0015-first-party-match-endpoints.md) (issue #31)
+- [0016. Email through an outbox and the email queue](0016-email-outbox.md) (issue #35)
