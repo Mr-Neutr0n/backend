@@ -194,6 +194,18 @@ def _cors_origins(name: str) -> list[str]:
     return origins
 
 
+def _frontend_url(name: str) -> str:
+    """Read a required exact origin, failing fast without echoing it."""
+    value = _required(name)
+    if not _is_origin(value):
+        raise ImproperlyConfigured(
+            f"{name} is not an origin. Use an exact origin: a scheme (http or "
+            "https), a host, and an optional port that is not the scheme's "
+            "default, with no path or trailing slash (see .env.example)."
+        )
+    return value
+
+
 def _celery_broker_url(url: str) -> str:
     """Return a checked REDIS_URL in the form kombu reads as one broker.
 
@@ -251,13 +263,16 @@ CSRF_TRUSTED_ORIGINS = _list("CSRF_TRUSTED_ORIGINS")
 
 # CORS (django-cors-headers). Browsers on these exact origins may call the
 # API, for example https://app.example.org. Unset or blank allows no
-# origin. Only /api/ paths get CORS headers.
+# origin. Only /api/ and /_allauth/ (account sign-up and login) paths get
+# CORS headers.
 CORS_ALLOWED_ORIGINS = _cors_origins("CORS_ALLOWED_ORIGINS")
-CORS_URLS_REGEX = r"^/api/"
+CORS_URLS_REGEX = r"^/(api|_allauth)/"
 # Never a wildcard, and never read from the environment.
 CORS_ALLOW_ALL_ORIGINS = False
-# Browsers send no cookies or session credentials cross-origin. API
-# clients authenticate with bearer tokens (issue #27).
+# Browsers send no cookies or session credentials cross-origin. Partner
+# clients authenticate with bearer tokens (issue #27), and allauth's app
+# client with the X-Session-Token header. allauth's browser client works
+# same-origin only until #102 allows credentials for first-party origins.
 CORS_ALLOW_CREDENTIALS = False
 
 # Valkey URL (redis:// or rediss://). The cache and Celery (issue #9)
@@ -283,6 +298,12 @@ INSTALLED_APPS = [
     "ninja",
     "django_celery_beat",
     "oauth2_provider",
+    # Account sign-up, login, email verification, and password reset,
+    # served only as JSON at /_allauth/ (allauth.headless). No social login,
+    # MFA, or user sessions app: see the Accounts section below.
+    "allauth",
+    "allauth.account",
+    "allauth.headless",
     "apps.accounts",
     "apps.audit",
     "apps.public_ids",
@@ -337,6 +358,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # allauth's per-request state. It must come after AuthenticationMiddleware.
+    "allauth.account.middleware.AccountMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -486,6 +509,69 @@ CELERY_BEAT_SCHEDULE = {
 # Days a pending (unconfirmed) match waits before the daily task voids it
 # (#26). Unset or empty means pending matches never expire.
 MATCH_CONFIRMATION_EXPIRY_DAYS = _positive_days("MATCH_CONFIRMATION_EXPIRY_DAYS")
+
+
+# Accounts (django-allauth)
+# https://docs.allauth.org/en/latest/account/configuration.html
+
+# ModelBackend serves the Django admin login. OPEN's allauth backend serves
+# the headless login and finds an Account through the manager's
+# get_by_natural_key (ADR 0003), never a raw email match. Both check
+# is_active. A headless login that either one authenticates still goes
+# through allauth's login flow, which enforces email verification.
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "apps.accounts.auth_backends.AuthenticationBackend",
+]
+
+# The email address is the login, and an Account has exactly one
+# (ADR 0003). Sign-up asks for an email and a password, nothing else.
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*"]
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_UNIQUE_EMAIL = True
+# Changing the address replaces it instead of adding a second one.
+ACCOUNT_CHANGE_EMAIL = True
+# No login until the address is verified.
+ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+# Verification and password reset use emailed links, not codes.
+ACCOUNT_EMAIL_VERIFICATION_BY_CODE_ENABLED = False
+ACCOUNT_PASSWORD_RESET_BY_CODE_ENABLED = False
+# Sign-up and password reset answer the same way whether or not an Account
+# has the address (allauth's default, set explicitly), and nothing is
+# mailed to an address that has no Account.
+ACCOUNT_PREVENT_ENUMERATION = True
+ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS = False
+# OPEN's adapter normalizes and checks every email address allauth takes
+# in, with the same rules as the Account email field.
+ACCOUNT_ADAPTER = "apps.accounts.adapter.AccountAdapter"
+# Rate limits stay at allauth's defaults (#100 tunes them). They live in
+# the cache.
+
+# JSON only, at /_allauth/browser/v1/ (session cookie and CSRF) and
+# /_allauth/app/v1/ (X-Session-Token header). No server-rendered allauth
+# pages: allauth.urls is never mounted.
+HEADLESS_ONLY = True
+HEADLESS_CLIENTS = ("browser", "app")
+# The user object in allauth's responses carries no row id.
+HEADLESS_ADAPTER = "apps.accounts.headless_adapter.HeadlessAdapter"
+# allauth's OpenAPI document, at /_allauth/openapi.json and
+# /_allauth/openapi.html.
+HEADLESS_SERVE_SPECIFICATION = True
+# The web app's origin, for example https://app.example.org. Links in
+# account emails (verify an address, reset a password) open pages there.
+# Required, and an exact origin like a CORS_ALLOWED_ORIGINS entry.
+FRONTEND_URL = _frontend_url("FRONTEND_URL")
+# Pages of the web app that allauth's email links open. Each takes the key
+# from its path and posts it back to /_allauth/.
+HEADLESS_FRONTEND_URLS = {
+    "account_confirm_email": f"{FRONTEND_URL}/account/verify-email/{{key}}",
+    "account_reset_password": f"{FRONTEND_URL}/account/password/reset",
+    "account_reset_password_from_key": (
+        f"{FRONTEND_URL}/account/password/reset/key/{{key}}"
+    ),
+    "account_signup": f"{FRONTEND_URL}/account/signup",
+}
 
 
 # Password validation

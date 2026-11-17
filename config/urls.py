@@ -25,4 +25,8 @@ urlpatterns = [
     path("api/v1/", api.urls),
     # Only the token and revoke views (apps/partners/urls.py).
     path("oauth/", include("apps.partners.urls")),
+    # allauth's headless JSON API (sign-up, login, email verification,
+    # password reset) for the browser and app clients, and its OpenAPI
+    # document. allauth.urls (server-rendered pages) is never mounted.
+    path("_allauth/", include("allauth.headless.urls")),
 ]

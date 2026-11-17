@@ -1,8 +1,8 @@
 """Tests for CORS on the API (issue #10).
 
-Browsers on the origins in CORS_ALLOWED_ORIGINS may call /api/. Every
-other origin, and every other path, gets no CORS headers. Credentials
-are never allowed cross-origin. Settings refuse an entry that is not an
+Browsers on the origins in CORS_ALLOWED_ORIGINS may call /api/ and
+/_allauth/ (issue #30). Every other origin, and every other path, gets no
+CORS headers. Credentials are never allowed cross-origin. Settings refuse an entry that is not an
 exact http or https origin, without echoing it, because gunicorn runs no
 system checks.
 """
@@ -49,8 +49,8 @@ def test_cors_middleware_runs_after_whitenoise_and_before_common() -> None:
     assert cors < middleware.index("django.middleware.common.CommonMiddleware")
 
 
-def test_cors_applies_to_api_paths_only() -> None:
-    assert settings.CORS_URLS_REGEX == r"^/api/"
+def test_cors_applies_to_api_and_allauth_paths_only() -> None:
+    assert settings.CORS_URLS_REGEX == r"^/(api|_allauth)/"
 
 
 def test_credentials_and_wildcard_stay_off() -> None:
@@ -60,6 +60,14 @@ def test_credentials_and_wildcard_stay_off() -> None:
 
 def test_allowed_origin_gets_the_allow_origin_header(allowed_client: Client) -> None:
     response = allowed_client.get(LIVE_URL, HTTP_ORIGIN=ALLOWED)
+    assert response.status_code == 200
+    assert response["Access-Control-Allow-Origin"] == ALLOWED
+    assert "access-control-allow-credentials" not in _cors_headers(response)
+
+
+@pytest.mark.django_db
+def test_allowed_origin_gets_cors_headers_on_allauth(allowed_client: Client) -> None:
+    response = allowed_client.get("/_allauth/browser/v1/config", HTTP_ORIGIN=ALLOWED)
     assert response.status_code == 200
     assert response["Access-Control-Allow-Origin"] == ALLOWED
     assert "access-control-allow-credentials" not in _cors_headers(response)

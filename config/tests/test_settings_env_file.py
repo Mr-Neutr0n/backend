@@ -42,6 +42,7 @@ DJANGO_ALLOWED_HOSTS=dotenv.example
 DATABASE_URL=postgres://open@dotenv-db.example:5432/open
 REDIS_URL=redis://dotenv-cache.example:6379/0
 CSRF_TRUSTED_ORIGINS=
+FRONTEND_URL=http://localhost:8081
 """
 
 
@@ -118,6 +119,7 @@ class EnvFileTests(SimpleTestCase):
                 "DJANGO_DEBUG": "True",
                 "DATABASE_URL": "postgres://open@process-db.example:5432/open",
                 "REDIS_URL": "redis://process-cache.example:6379/0",
+                "FRONTEND_URL": "http://localhost:8081",
             }
         )
         self.assertIs(values["DEBUG"], True)
