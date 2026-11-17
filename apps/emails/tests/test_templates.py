@@ -8,6 +8,7 @@ only.
 """
 
 from collections.abc import Iterator
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,12 @@ from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tests.headless import APP, signup
 from apps.emails.models import QueuedEmail
 from apps.emails.services import queue_email
-from apps.emails.tests.hygiene import assert_clean_message, assert_clean_template
+from apps.emails.tests.hygiene import (
+    assert_clean_message,
+    assert_clean_template,
+    assert_links_only_to_the_web_app,
+    hrefs,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -226,4 +232,6 @@ def test_headless_signup_queues_opens_email() -> None:
     assert row.subject == "Verify your email address for OPEN"
     assert AUTOMATED in row.body
     assert AUTOMATED in row.html
-    assert "<a href=" in row.html
+    [href] = hrefs(row.html)
+    assert unescape(href).startswith(f"{FRONTEND_URL}/account/verify-email/")
+    assert_links_only_to_the_web_app(row.html)
