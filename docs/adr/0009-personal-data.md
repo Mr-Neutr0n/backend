@@ -119,7 +119,7 @@ Personal data stays while the Account exists. There is no automatic deletion of 
 - Every planned personal data field goes in the inventory when it lands.
 - No model's `__str__` returns an identifying field, so Django's admin log (`django.contrib.admin.models.LogEntry.object_repr`) and admin messages never hold one. For example, `Player.__str__` returns the OPEN Code.
 - `accounts.User.__str__` returns the email address today (`self.email`). This is the known exception. #116 clears every admin log entry tied to the deleted Account: its own, and any for a record that belongs to it.
-- allauth's `EmailAddress` (#30) returns the email address from `__str__`. #30 or #116 must handle it the same way.
+- allauth's `EmailAddress` returns the email address from `__str__`. #30 unregistered its admin, so the admin log never holds it.
 - Partner integrations cannot look up or receive data about players aged 13 to 17 until they turn 18. Matches a Partner submits that name them still count (#32).
 - The age bands are not fixed here.
 
