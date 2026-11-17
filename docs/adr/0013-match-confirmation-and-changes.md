@@ -31,7 +31,7 @@ A match should move ratings only once both teams agree on it, or once someone tr
 - `match_confirmed` can fire for a match that a duplicate flag holds. Receivers check `counted()` before rating it.
 - A receiver that raises rolls the whole change back. One match that cannot expire is logged by id and skipped, and the run then fails, so the others still expire.
 - An active superuser is a moderator.
-- Dispute text is not stored in the audit log, which cannot be erased. #31 decides where a player's dispute text lives, if anywhere.
+- Dispute text is not stored in the audit log, which cannot be erased. #31 decided that a dispute takes no text, so none is stored (ADR 0015).
 - `MatchFlag` rows are not guarded. #40 adds flag resolution, and must send `match_changed` when it releases a hold.
 
 ## Alternatives considered

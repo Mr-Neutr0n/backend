@@ -2,7 +2,10 @@
 
 `config/urls.py` mounts `api` once. The OpenAPI document is served at
 /api/v1/openapi.json and the interactive docs at /api/v1/docs. The health
-router (`config/health.py`) is mounted at /api/v1/health/.
+router (`config/health.py`) is mounted at /api/v1/health/, the signed-in
+Account at /api/v1/accounts/, match submission, confirmation, and
+dispute at /api/v1/matches/, and a player's match history at
+/api/v1/players/.
 
 Adding an app's endpoints (one router per app):
 
@@ -30,8 +33,10 @@ operation of `api` covers it.
 
 Errors raised while an operation runs (input that fails validation, a body
 that does not parse, `Http404`, any `HttpError`, a failed `auth` check,
-which returns 401, and a `DuplicateMatchError`, which returns 409) come
-back as `ErrorResponse` (see `config/api_errors.py`). Every operation that
+which returns 401, a `DuplicateMatchError`, which returns 409, a
+`MatchValidationError`, which returns 422, a `MatchPermissionDenied` or
+`MatchActionDenied`, which return 403, and a `MatchStateError`, which
+returns 409) come back as `ErrorResponse` (see `config/api_errors.py`). Every operation that
 takes input documents a 422 response with that schema, and may not declare
 a different 422 schema. Every operation with `auth` (such as
 `config.auth.account_auth`) documents a 401 response with it.
@@ -49,6 +54,8 @@ from ninja.openapi.schema import OpenAPISchema
 from ninja.schema import NinjaGenerateJsonSchema
 
 from apps.accounts.api import router as accounts_router
+from apps.matches.api import router as matches_router
+from apps.players.api import router as players_router
 from config.api_errors import (
     UNAUTHORIZED_STATUS,
     VALIDATION_ERROR_STATUS,
@@ -191,3 +198,5 @@ api = OpenNinjaAPI(
 
 api.add_router("health/", health_router)
 api.add_router("accounts/", accounts_router)
+api.add_router("matches/", matches_router)
+api.add_router("players/", players_router)

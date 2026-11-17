@@ -5,15 +5,22 @@
 - the app client's session token, sent in the `X-Session-Token` header
   (no CSRF, since no cookie is involved), and
 - the browser client's Django session cookie, with CSRF checked on unsafe
-  methods (ninja's `SessionAuth`).
+  methods (`SessionAuth`, a subclass of ninja's).
 
 Pass it as an operation's or router's `auth`. The signed-in Account is in
-`request.auth` (and `request.user`). A request that neither one
-authenticates gets a 401 `ErrorResponse` (`config/api_errors.py`).
+`request.auth` (and `request.user`) as a plain Account instance, never
+Django's lazy proxy, so a view can pass it straight to a service that
+reads the actor's model class. A request that
+neither one authenticates gets a 401 `ErrorResponse`
+(`config/api_errors.py`), whatever its method. A signed-in session's
+unsafe request without a valid CSRF token gets 403.
 """
 
+from typing import Any
+
 from allauth.headless.contrib.ninja.security import XSessionTokenAuth
-from ninja.security import SessionAuth
+from django.http import HttpRequest
+from ninja.security import SessionAuth as NinjaSessionAuth
 
 
 class SessionTokenAuth(XSessionTokenAuth):
@@ -25,6 +32,33 @@ class SessionTokenAuth(XSessionTokenAuth):
 
     openapi_in: str = "header"
     openapi_name: str = "X-Session-Token"
+
+
+class SessionAuth(NinjaSessionAuth):
+    """ninja's session cookie auth, which checks CSRF only for a session.
+
+    ninja's class checks CSRF before it looks for a signed-in user, so an
+    unsafe request with no session at all is refused as a CSRF failure
+    (403) instead of as unauthenticated (401). This one returns None when
+    the request has no signed-in user (Django's auth backends leave an
+    inactive Account's session signed out), and runs ninja's check, CSRF
+    included, only when it has one. The name stays `SessionAuth`, the
+    OpenAPI security scheme's name.
+    """
+
+    def __call__(self, request: HttpRequest) -> Any | None:
+        if not request.user.is_authenticated:
+            return None
+        return super().__call__(request)
+
+    def authenticate(self, request: HttpRequest, key: str | None) -> Any | None:
+        """The signed-in Account itself, not Django's lazy ``request.user``.
+
+        ``__call__`` already read ``is_authenticated``, which loaded the
+        Account behind the proxy, so unwrapping it needs no query. It runs
+        only for a signed-in user.
+        """
+        return getattr(request.user, "_wrapped", request.user)
 
 
 account_auth = [SessionTokenAuth(), SessionAuth()]

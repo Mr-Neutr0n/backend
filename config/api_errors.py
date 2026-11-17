@@ -2,14 +2,18 @@
 
 Errors raised while an operation runs (input that fails validation, a body
 that does not parse, `Http404`, any `HttpError`,
-`apps.matches.services.DuplicateMatchError`, and
-`apps.matches.permissions.MatchPermissionDenied`) come back as an
-`ErrorResponse`:
+`apps.matches.services.DuplicateMatchError`,
+`apps.matches.services.MatchValidationError`,
+`apps.matches.permissions.MatchPermissionDenied`,
+`apps.matches.permissions.MatchActionDenied`, and
+`apps.matches.workflow.MatchStateError`) come back as an `ErrorResponse`:
 
     {"code": "...", "message": "...", "errors": [{"field", "code", "message"}]}
 
-`errors` lists one item per invalid input for a validation error, one item
-for a duplicate match (409), and is empty otherwise. For a pydantic error,
+`errors` lists one item per invalid input for a validation error (a
+`MatchValidationError` gives one item per `MatchIssue`, with its field,
+code, and fixed message), one item for a duplicate match (409), and is
+empty otherwise. For a pydantic error,
 an item copies only pydantic's location, error type, and message, never its
 `input` or `ctx`. The message is
 pydantic's own text, so a custom validator must not put the submitted value
@@ -26,6 +30,10 @@ it. A repeated external id always names it.
 
 A `MatchPermissionDenied` returns 403 with code "forbidden", fixed text,
 and no items. It never says which rule failed.
+
+A `MatchActionDenied` returns 403 with code "forbidden", fixed text, and
+no items. A `MatchStateError` returns 409 with code "conflict", fixed
+text, and no items. Neither says which rule or state refused the change.
 
 A request that an operation's `auth` does not authenticate (ninja's
 `AuthenticationError`, see `config/auth.py`) returns 401 with code
@@ -44,14 +52,21 @@ from django.http import Http404, HttpRequest, HttpResponse
 from ninja import NinjaAPI, Schema
 from ninja.errors import AuthenticationError, HttpError, ValidationError
 
-from apps.matches.permissions import MatchPermissionDenied
-from apps.matches.services import DuplicateKind, DuplicateMatchError
+from apps.matches.permissions import MatchActionDenied, MatchPermissionDenied
+from apps.matches.services import (
+    DuplicateKind,
+    DuplicateMatchError,
+    MatchValidationError,
+)
+from apps.matches.workflow import MatchStateError
 
 VALIDATION_ERROR_STATUS = 422
 UNAUTHORIZED_STATUS = 401
 UNAUTHORIZED_MESSAGE = "Authentication required."
 DUPLICATE_MATCH_STATUS = 409
 FORBIDDEN_STATUS = 403
+CONFLICT_STATUS = 409
+VALIDATION_ERROR_MESSAGE = "The request is not valid."
 
 _DUPLICATE_FIELDS: Mapping[DuplicateKind, str] = {
     DuplicateKind.DUPLICATE_MATCH: "match",
@@ -124,7 +139,7 @@ def install_error_handlers(api: NinjaAPI) -> None:
     def on_validation_error(request: HttpRequest, exc: ValidationError) -> HttpResponse:
         body = ErrorResponse(
             code="validation_error",
-            message="The request is not valid.",
+            message=VALIDATION_ERROR_MESSAGE,
             errors=[item for error in exc.errors for item in _field_errors(error)],
         )
         return _respond(api, request, VALIDATION_ERROR_STATUS, body)
@@ -179,3 +194,33 @@ def install_error_handlers(api: NinjaAPI) -> None:
         # Fixed text only: never which rule failed.
         body = ErrorResponse(code="forbidden", message=exc.message, errors=[])
         return _respond(api, request, FORBIDDEN_STATUS, body)
+
+    @api.exception_handler(MatchValidationError)
+    def on_match_validation_error(
+        request: HttpRequest, exc: MatchValidationError
+    ) -> HttpResponse:
+        # Each issue's message is fixed text: never a submitted value.
+        body = ErrorResponse(
+            code="validation_error",
+            message=VALIDATION_ERROR_MESSAGE,
+            errors=[
+                FieldError(field=issue.field, code=issue.code, message=issue.message)
+                for issue in exc.issues
+            ],
+        )
+        return _respond(api, request, VALIDATION_ERROR_STATUS, body)
+
+    @api.exception_handler(MatchActionDenied)
+    def on_match_action_denied(
+        request: HttpRequest, exc: MatchActionDenied
+    ) -> HttpResponse:
+        # Fixed text only: never which rule failed or the match's state.
+        body = ErrorResponse(code="forbidden", message=exc.message, errors=[])
+        return _respond(api, request, FORBIDDEN_STATUS, body)
+
+    @api.exception_handler(MatchStateError)
+    def on_match_state_error(
+        request: HttpRequest, exc: MatchStateError
+    ) -> HttpResponse:
+        body = ErrorResponse(code="conflict", message=exc.message, errors=[])
+        return _respond(api, request, CONFLICT_STATUS, body)
