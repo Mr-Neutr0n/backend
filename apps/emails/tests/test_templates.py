@@ -71,8 +71,9 @@ EMAILS: dict[str, tuple[str, str, str]] = {
     "account/email/email_confirmation": (
         "Verify your email address for OPEN",
         VERIFY_URL,
-        "You received this email because someone entered this email address "
-        "on OPEN and asked to verify it.",
+        "You received this email because this email address is on an OPEN "
+        "account but is not verified yet, and someone signed in with it, added "
+        "it to the account, or asked for a new verification link.",
     ),
     "account/email/password_reset_key": (
         "Reset your OPEN password",
