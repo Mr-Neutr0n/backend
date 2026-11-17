@@ -690,12 +690,15 @@ WHITENOISE_ALLOW_ALL_ORIGINS = False
 #
 # Production sends through Resend with django-anymail:
 # EMAIL_BACKEND=anymail.backends.resend.EmailBackend and RESEND_API_KEY.
-# Switching to Amazon SES: run uv add "django-anymail[amazon-ses]", set
+# Switching to Amazon SES needs no code change: run
+# uv add "django-anymail[amazon-ses]", set
 # EMAIL_BACKEND=anymail.backends.amazon_ses.EmailBackend, and set boto3's
 # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION (or
 # AWS_DEFAULT_REGION) in the environment. The SES backend uses boto3,
-# which ignores ANYMAIL_REQUESTS_TIMEOUT below, so also keep boto3's
-# timeouts under send_queued_email's soft time limit here:
+# which ignores ANYMAIL_REQUESTS_TIMEOUT below. Without more, a slow SES
+# request reaches send_queued_email's soft time limit: the row is kept and
+# the sweep retries it about an hour later, with no backoff retry. To get
+# backoff retries for SES timeouts too, optionally add
 # ANYMAIL["AMAZON_SES_CLIENT_PARAMS"] = {"config": botocore.config.Config(
 #     connect_timeout=5, read_timeout=20, retries={"max_attempts": 1})}
 _REFUSED_EMAIL_BACKENDS_WITHOUT_DEBUG = frozenset(
@@ -741,7 +744,7 @@ elif not DEBUG and EMAIL_BACKEND == _RESEND_EMAIL_BACKEND:
 # task retries with backoff, not a task cut off by its time limit.
 # anymail's default, 30 seconds for each, could reach that limit. It
 # applies only to anymail's requests-based backends, Resend among them;
-# SES uses boto3 (see the SES steps above).
+# SES uses boto3 (see the SES note above).
 ANYMAIL_REQUESTS_TIMEOUT = (5, 20)
 
 # The sender of every message, such as OPEN <noreply@example.org>. Its
