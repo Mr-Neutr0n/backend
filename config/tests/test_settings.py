@@ -27,6 +27,7 @@ SETTINGS_VARS = (
     "CSRF_TRUSTED_ORIGINS",
     "CORS_ALLOWED_ORIGINS",
     "MATCH_CONFIRMATION_EXPIRY_DAYS",
+    "FRONTEND_URL",
 )
 
 # Made-up values for tests only. Not a real secret.
@@ -40,6 +41,7 @@ PRODUCTION_LIKE = {
     "REDIS_URL": "rediss://cache.example.org:6379/0",
     "CSRF_TRUSTED_ORIGINS": "https://api.example.org",
     "CORS_ALLOWED_ORIGINS": "https://app.example.org",
+    "FRONTEND_URL": "https://app.example.org",
 }
 
 LOCAL_DEBUG = {
@@ -50,6 +52,7 @@ LOCAL_DEBUG = {
     "REDIS_URL": "redis://localhost:6379/0",
     "CSRF_TRUSTED_ORIGINS": "",
     "CORS_ALLOWED_ORIGINS": "",
+    "FRONTEND_URL": "http://localhost:8081",
 }
 
 PRINT_SETTINGS = """

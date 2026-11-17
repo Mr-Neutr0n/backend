@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 import django_stubs_ext
 import environ
 from celery.schedules import crontab
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 from kombu import Queue
 
@@ -194,6 +195,26 @@ def _cors_origins(name: str) -> list[str]:
     return origins
 
 
+def _frontend_url(name: str, *, require_https: bool) -> str:
+    """Read a required exact origin, failing fast without echoing it.
+
+    With require_https (DEBUG off), only an https origin is accepted.
+    """
+    value = _required(name)
+    if not _is_origin(value):
+        raise ImproperlyConfigured(
+            f"{name} is not an origin. Use an exact origin: a scheme (http or "
+            "https), a host, and an optional port that is not the scheme's "
+            "default, with no path or trailing slash (see .env.example)."
+        )
+    if require_https and not value.startswith("https://"):
+        raise ImproperlyConfigured(
+            f"{name} must use https when DJANGO_DEBUG is off: its links carry "
+            "email verification and password reset keys (see .env.example)."
+        )
+    return value
+
+
 def _celery_broker_url(url: str) -> str:
     """Return a checked REDIS_URL in the form kombu reads as one broker.
 
@@ -251,14 +272,30 @@ CSRF_TRUSTED_ORIGINS = _list("CSRF_TRUSTED_ORIGINS")
 
 # CORS (django-cors-headers). Browsers on these exact origins may call the
 # API, for example https://app.example.org. Unset or blank allows no
-# origin. Only /api/ paths get CORS headers.
+# origin. Only /api/ and /_allauth/ (account sign-up and login) paths get
+# CORS headers.
 CORS_ALLOWED_ORIGINS = _cors_origins("CORS_ALLOWED_ORIGINS")
-CORS_URLS_REGEX = r"^/api/"
+CORS_URLS_REGEX = r"^/(api|_allauth)/"
 # Never a wildcard, and never read from the environment.
 CORS_ALLOW_ALL_ORIGINS = False
-# Browsers send no cookies or session credentials cross-origin. API
-# clients authenticate with bearer tokens (issue #27).
+# Browsers send no cookies or session credentials cross-origin. What works
+# from an allowed origin:
+# - the OPEN API with no credentials (health checks, public operations);
+# - allauth's app client (/_allauth/app/ and /api/v1/ with its token): it
+#   sends its session token in X-Session-Token, and checks an emailed key
+#   with GET in X-Email-Verification-Key or X-Password-Reset-Key, all three
+#   allowed below.
+# Partner clients will use bearer tokens in Authorization (issue #27). The
+# browser client (/_allauth/browser/) uses the session cookie, so it works
+# same-origin only until #102 allows credentials for first-party origins.
 CORS_ALLOW_CREDENTIALS = False
+# corsheaders' default request headers, plus the three allauth reads.
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "x-session-token",
+    "x-email-verification-key",
+    "x-password-reset-key",
+)
 
 # Valkey URL (redis:// or rediss://). The cache and Celery (issue #9)
 # read it from here.
@@ -283,6 +320,12 @@ INSTALLED_APPS = [
     "ninja",
     "django_celery_beat",
     "oauth2_provider",
+    # Account sign-up, login, email verification, and password reset,
+    # served only as JSON at /_allauth/ (allauth.headless). No social login,
+    # MFA, or user sessions app: see the Accounts section below.
+    "allauth",
+    "allauth.account",
+    "allauth.headless",
     "apps.accounts",
     "apps.audit",
     "apps.public_ids",
@@ -337,6 +380,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # allauth's per-request state. It must come after AuthenticationMiddleware.
+    "allauth.account.middleware.AccountMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -488,6 +533,81 @@ CELERY_BEAT_SCHEDULE = {
 MATCH_CONFIRMATION_EXPIRY_DAYS = _positive_days("MATCH_CONFIRMATION_EXPIRY_DAYS")
 
 
+# Accounts (django-allauth)
+# https://docs.allauth.org/en/latest/account/configuration.html
+
+# For an allauth login, OPEN's account adapter first refuses an address
+# that is not canonical (a variant NFKC folds onto an Account's address),
+# before either backend runs. Django then tries these in order. ModelBackend
+# comes first and authenticates every successful login, the Django admin's
+# and allauth's headless login alike: it finds the Account with the
+# manager's get_by_natural_key (ADR 0003). OPEN's allauth backend runs only
+# when ModelBackend finds no Account to log in. It looks Accounts up the
+# same way, never through an EmailAddress row, and stashes an inactive
+# Account whose password matched, so allauth answers "inactive" instead of
+# "wrong password". Both check is_active. A headless login still goes
+# through allauth's login flow, which enforces email verification.
+AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
+    "apps.accounts.auth_backends.AuthenticationBackend",
+]
+
+# The email address is the login, and an Account has exactly one
+# (ADR 0003). Sign-up asks for an email and a password, nothing else.
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*"]
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None
+ACCOUNT_UNIQUE_EMAIL = True
+# Changing the address replaces it instead of adding a second one.
+ACCOUNT_CHANGE_EMAIL = True
+# No login until the address is verified.
+ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+# Verification and password reset use emailed links, not codes.
+ACCOUNT_EMAIL_VERIFICATION_BY_CODE_ENABLED = False
+ACCOUNT_PASSWORD_RESET_BY_CODE_ENABLED = False
+# Sign-up and password reset answer the same way whether or not an Account
+# has the address (allauth's default, set explicitly), and nothing is
+# mailed to an address that has no Account.
+ACCOUNT_PREVENT_ENUMERATION = True
+ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS = False
+# OPEN's adapter applies the Account email rules. Its clean_email
+# normalizes and checks a new address (sign-up, and adding an address)
+# with the same rules as the Account email field. Login (its authenticate)
+# and the password reset request (apps/accounts/headless_views.py) accept
+# only a canonical address (is_canonical_email) and find the Account
+# through get_by_natural_key.
+ACCOUNT_ADAPTER = "apps.accounts.adapter.AccountAdapter"
+# Rate limits stay at allauth's defaults (#100 tunes them). They live in
+# the cache.
+
+# JSON only, at /_allauth/browser/v1/ (session cookie and CSRF) and
+# /_allauth/app/v1/ (X-Session-Token header). No server-rendered allauth
+# pages: allauth.urls is never mounted.
+HEADLESS_ONLY = True
+HEADLESS_CLIENTS = ("browser", "app")
+# The user object in allauth's responses carries no row id.
+HEADLESS_ADAPTER = "apps.accounts.headless_adapter.HeadlessAdapter"
+# allauth's OpenAPI document, at /_allauth/openapi.json and
+# /_allauth/openapi.html.
+HEADLESS_SERVE_SPECIFICATION = True
+# The web app's origin, for example https://app.example.org. Links in
+# account emails (verify an address, reset a password) open pages there.
+# Required, and an exact origin like a CORS_ALLOWED_ORIGINS entry. With
+# DEBUG off it must be https, since the links carry verification and
+# password reset keys.
+FRONTEND_URL = _frontend_url("FRONTEND_URL", require_https=not DEBUG)
+# Pages of the web app that allauth's email links open. Each takes the key
+# from its path and posts it back to /_allauth/.
+HEADLESS_FRONTEND_URLS = {
+    "account_confirm_email": f"{FRONTEND_URL}/account/verify-email/{{key}}",
+    "account_reset_password": f"{FRONTEND_URL}/account/password/reset",
+    "account_reset_password_from_key": (
+        f"{FRONTEND_URL}/account/password/reset/key/{{key}}"
+    ),
+    "account_signup": f"{FRONTEND_URL}/account/signup",
+}
+
+
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
@@ -545,7 +665,8 @@ STORAGES = {
 }
 
 # WhiteNoise would add Access-Control-Allow-Origin: * to every static
-# file. CORS covers /api/ paths only, so static files get no CORS header.
+# file. CORS covers /api/ and /_allauth/ paths only, so static files get no
+# CORS header.
 WHITENOISE_ALLOW_ALL_ORIGINS = False
 
 # Email. Nothing is sent. With DEBUG on, every message prints to the

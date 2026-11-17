@@ -18,6 +18,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from apps.accounts.headless_views import headless_urlpatterns
 from config.api import api
 
 urlpatterns = [
@@ -25,4 +26,11 @@ urlpatterns = [
     path("api/v1/", api.urls),
     # Only the token and revoke views (apps/partners/urls.py).
     path("oauth/", include("apps.partners.urls")),
+    # OPEN's replacements for some allauth headless views, at allauth's own
+    # paths, so they must come first (apps/accounts/headless_views.py).
+    path("_allauth/", include(headless_urlpatterns())),
+    # allauth's headless JSON API (sign-up, login, email verification,
+    # password reset) for the browser and app clients, and its OpenAPI
+    # document. allauth.urls (server-rendered pages) is never mounted.
+    path("_allauth/", include("allauth.headless.urls")),
 ]

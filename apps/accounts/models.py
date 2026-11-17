@@ -1,7 +1,8 @@
 from typing import Any, ClassVar
 
+from django.apps import apps
 from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q, QuerySet, Value
 from django.db.models.functions import Lower
 
@@ -124,6 +125,42 @@ class User(AbstractUser):
 
     def __str__(self) -> str:
         return self.email
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Save, dropping allauth's rows for addresses that are not the login.
+
+        When a save changes `email` (staff in the admin, or any code that
+        sets it), the Account's allauth EmailAddress rows for any other
+        address are deleted in the same transaction. A stale row would keep
+        the old address from its real owner: allauth would count it at
+        sign-up and refuse to verify it for anyone else. The new address
+        gets no row here; the next headless login adds one, unverified, and
+        asks for verification. allauth's own change of address saves
+        `email` after making the new address its primary, verified row, so
+        that row is kept and only the old ones go.
+
+        Raw writes (`QuerySet.update`, `bulk_update`, raw SQL) skip this.
+        """
+        update_fields = kwargs.get("update_fields")
+        checks_email = self.pk is not None and (
+            update_fields is None or "email" in update_fields
+        )
+        if not checks_email:
+            super().save(*args, **kwargs)
+            return
+        with transaction.atomic(using=kwargs.get("using")):
+            stored = (
+                type(self)
+                ._default_manager.filter(pk=self.pk)
+                .values_list("email", flat=True)
+                .first()
+            )
+            super().save(*args, **kwargs)
+            if stored is not None and stored != self.email:
+                email_address = apps.get_model("account", "EmailAddress")
+                email_address.objects.filter(user_id=self.pk).alias(
+                    email_lower=Lower("email")
+                ).exclude(email_lower=Lower(Value(self.email))).delete()
 
     def get_full_name(self) -> str:
         """Accounts carry no name; a person's name lives on Player."""

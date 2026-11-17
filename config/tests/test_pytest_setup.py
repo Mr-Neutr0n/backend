@@ -120,6 +120,8 @@ def test_debug_off_run_keeps_test_overrides() -> None:
             "REDIS_URL": "redis://127.0.0.1:1/0",
             "CSRF_TRUSTED_ORIGINS": "",
             "CORS_ALLOWED_ORIGINS": "",
+            # https, since DEBUG is off.
+            "FRONTEND_URL": "https://app.example.org",
         }
         if "HOME" in os.environ:
             env["HOME"] = os.environ["HOME"]

@@ -29,10 +29,12 @@ document that has none. An operation left out of the document
 operation of `api` covers it.
 
 Errors raised while an operation runs (input that fails validation, a body
-that does not parse, `Http404`, any `HttpError`, and a
-`DuplicateMatchError`, which returns 409) come back as `ErrorResponse` (see
-`config/api_errors.py`). Every operation that takes input documents a
-422 response with that schema, and may not declare a different 422 schema.
+that does not parse, `Http404`, any `HttpError`, a failed `auth` check,
+which returns 401, and a `DuplicateMatchError`, which returns 409) come
+back as `ErrorResponse` (see `config/api_errors.py`). Every operation that
+takes input documents a 422 response with that schema, and may not declare
+a different 422 schema. Every operation with `auth` (such as
+`config.auth.account_auth`) documents a 401 response with it.
 Two kinds of error never reach these handlers: a known path called with the
 wrong method gets ninja's plain-text 405, and a path under /api/v1/ that
 matches no operation gets Django's own 404 page.
@@ -46,7 +48,9 @@ from ninja.errors import ValidationError, ValidationErrorContext
 from ninja.openapi.schema import OpenAPISchema
 from ninja.schema import NinjaGenerateJsonSchema
 
+from apps.accounts.api import router as accounts_router
 from config.api_errors import (
+    UNAUTHORIZED_STATUS,
     VALIDATION_ERROR_STATUS,
     ErrorResponse,
     install_error_handlers,
@@ -116,7 +120,8 @@ def _wire_location(error: dict[str, Any], single_attr: str | None) -> dict[str, 
 
 
 def _document_errors(schema: OpenAPISchema) -> None:
-    """Add `ErrorResponse` and a 422 response to every operation with input."""
+    """Add `ErrorResponse`, a 422 response to every operation with input, and
+    a 401 response to every operation that takes auth."""
     error_schema = ErrorResponse.model_json_schema(
         ref_template=_SCHEMA_REF, schema_generator=NinjaGenerateJsonSchema
     )
@@ -138,8 +143,16 @@ def _document_errors(schema: OpenAPISchema) -> None:
         "description": "The request is not valid.",
         "content": {"application/json": {"schema": error_ref}},
     }
+    unauthorized = {
+        "description": "The request is not authenticated.",
+        "content": {"application/json": {"schema": error_ref}},
+    }
     for path_item in schema.get("paths", {}).values():
         for operation in path_item.values():
+            if operation.get("security"):
+                operation.setdefault("responses", {})[UNAUTHORIZED_STATUS] = (
+                    unauthorized
+                )
             has_input = bool(operation.get("parameters")) or "requestBody" in operation
             if not has_input:
                 continue
@@ -168,7 +181,8 @@ api = OpenNinjaAPI(
     version="0.1.0",
     description=(
         "The free and open API of OPEN, the Open Pickleball Evaluation Network. "
-        "No OPEN rating is live yet: any rating it serves is a demonstration rating."
+        "No OPEN rating is live yet: any rating it serves is a demonstration rating. "
+        "Account sign-up, login, and email verification: see /_allauth/openapi.html."
     ),
     urls_namespace="api-v1",
     docs_url="/docs",
@@ -176,3 +190,4 @@ api = OpenNinjaAPI(
 )
 
 api.add_router("health/", health_router)
+api.add_router("accounts/", accounts_router)
