@@ -107,7 +107,8 @@ def _render(prefix: str) -> EmailMessage:
     }
     ctx.update(_context(prefix))
     with allauth_context.request_context(request):
-        return AccountAdapter(request).render_mail(prefix, TO, ctx)
+        message: EmailMessage = AccountAdapter(request).render_mail(prefix, TO, ctx)
+    return message
 
 
 def _html(message: EmailMessage) -> str:
