@@ -200,9 +200,13 @@ def sweep_queued_emails() -> dict[str, int]:
 
     Beat runs it every 15 minutes. A row created more than three days ago
     is deleted, sent or not. A row older than an hour with no send attempt
-    in the last hour is queued again by id, in batches. Returns only the
-    two counts. Safe to run twice: the send task skips a row another run
-    holds, and does nothing for a row that is gone.
+    in the last hour is queued again by id, in batches. Each queued row's
+    attempt time is set to one lease ago, as the send task's retry does:
+    the queued task can claim it at once, and later sweeps skip it for
+    most of an hour, so a worker that is down or behind does not collect
+    one more task per row at every sweep. Returns only the two counts.
+    Safe to run twice: the send task skips a row another run holds, and
+    does nothing for a row that is gone.
     """
     now = timezone.now()
     deleted, _ = QueuedEmail.objects.filter(created_at__lt=now - EXPIRY).delete()
@@ -211,12 +215,19 @@ def sweep_queued_emails() -> dict[str, int]:
         QueuedEmail.objects.filter(created_at__lt=cutoff)
         .filter(Q(last_attempt_at__isnull=True) | Q(last_attempt_at__lt=cutoff))
         .order_by("pk")
-        .values_list("pk", flat=True)
     )
     requeued = 0
     last_id = 0
     while True:
-        batch = list(stuck.filter(pk__gt=last_id)[:SWEEP_BATCH])
+        # Rows a send task holds are skipped, never marked: marking would
+        # end that task's lease.
+        with transaction.atomic():
+            batch = list(
+                stuck.filter(pk__gt=last_id)
+                .select_for_update(skip_locked=True)
+                .values_list("pk", flat=True)[:SWEEP_BATCH]
+            )
+            QueuedEmail.objects.filter(pk__in=batch).update(last_attempt_at=now - LEASE)
         if not batch:
             break
         for queued_email_id in batch:
