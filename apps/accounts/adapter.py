@@ -21,4 +21,5 @@ class AccountAdapter(DefaultAccountAdapter):
         errors = normalized_email_errors(normalized)
         if errors:
             raise errors[0]
-        return super().clean_email(normalized)
+        cleaned: str = super().clean_email(normalized)
+        return cleaned

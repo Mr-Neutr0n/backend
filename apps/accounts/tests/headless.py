@@ -52,7 +52,7 @@ def login(
 
 def link_in_last_mail(prefix: str) -> str:
     """The one link in the last email that starts with prefix."""
-    body = mail.outbox[-1].body
+    body = str(mail.outbox[-1].body)
     links = re.findall(re.escape(prefix) + r"\S+", body)
     assert len(links) == 1, body
     return str(links[0])
