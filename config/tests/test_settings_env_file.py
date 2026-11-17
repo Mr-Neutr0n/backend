@@ -43,6 +43,9 @@ DATABASE_URL=postgres://open@dotenv-db.example:5432/open
 REDIS_URL=redis://dotenv-cache.example:6379/0
 CSRF_TRUSTED_ORIGINS=
 FRONTEND_URL=https://dotenv-app.example
+EMAIL_BACKEND=anymail.backends.resend.EmailBackend
+RESEND_API_KEY=re_made_up_test_only_dotenv
+DEFAULT_FROM_EMAIL=OPEN <noreply@dotenv.example>
 """
 
 

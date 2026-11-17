@@ -28,10 +28,15 @@ SETTINGS_VARS = (
     "CORS_ALLOWED_ORIGINS",
     "MATCH_CONFIRMATION_EXPIRY_DAYS",
     "FRONTEND_URL",
+    "EMAIL_BACKEND",
+    "RESEND_API_KEY",
+    "DEFAULT_FROM_EMAIL",
 )
 
 # Made-up values for tests only. Not a real secret.
 TEST_SECRET_KEY = "test-only-" + "k3y" * 16
+TEST_RESEND_API_KEY = "re_made_up_test_only_" + "x" * 16
+RESEND_BACKEND = "anymail.backends.resend.EmailBackend"
 
 PRODUCTION_LIKE = {
     "DJANGO_SECRET_KEY": TEST_SECRET_KEY,
@@ -42,6 +47,9 @@ PRODUCTION_LIKE = {
     "CSRF_TRUSTED_ORIGINS": "https://api.example.org",
     "CORS_ALLOWED_ORIGINS": "https://app.example.org",
     "FRONTEND_URL": "https://app.example.org",
+    "EMAIL_BACKEND": RESEND_BACKEND,
+    "RESEND_API_KEY": TEST_RESEND_API_KEY,
+    "DEFAULT_FROM_EMAIL": "OPEN <noreply@example.org>",
 }
 
 LOCAL_DEBUG = {
