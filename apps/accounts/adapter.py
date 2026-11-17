@@ -54,3 +54,18 @@ class AccountAdapter(DefaultAccountAdapter):
             return None
         user: AbstractBaseUser | None = super().authenticate(request, **credentials)
         return user
+
+    def send_password_reset_mail(
+        self, user: AbstractBaseUser, email: str, context: dict[str, Any]
+    ) -> None:
+        """Mail the reset key to the Account's stored address only.
+
+        allauth passes the submitted spelling as ``email``. A key goes to
+        ``User.email``, never to that spelling, and a submitted address that
+        is not canonical gets nothing, like an unknown address (the answer is
+        the same either way).
+        """
+        if not is_canonical_email(email):
+            return
+        stored = getattr(user, get_user_model().EMAIL_FIELD)
+        self.send_mail("account/email/password_reset_key", stored, context)
