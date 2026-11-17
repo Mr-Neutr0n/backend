@@ -320,6 +320,8 @@ INSTALLED_APPS = [
     "ninja",
     "django_celery_beat",
     "oauth2_provider",
+    # Sends email through a provider's API (Resend), chosen by EMAIL_BACKEND.
+    "anymail",
     # Account sign-up, login, email verification, and password reset,
     # served only as JSON at /_allauth/ (allauth.headless). No social login,
     # MFA, or user sessions app: see the Accounts section below.
@@ -336,6 +338,8 @@ INSTALLED_APPS = [
     # Application admin that oauth2_provider registers.
     "apps.partners",
     "apps.matches",
+    # The email outbox: messages wait here for the email queue (ADR 0016).
+    "apps.emails",
     # Development only: the seed_dev_data command. No models.
     "apps.devdata",
 ]
@@ -523,6 +527,13 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
         "options": {"expire_seconds": 3600},
     },
+    # Deletes queued emails older than three days and queues stuck ones
+    # again (ADR 0016). A run missed for 15 minutes is dropped.
+    "sweep-queued-emails": {
+        "task": "apps.emails.tasks.sweep_queued_emails",
+        "schedule": crontab(minute="*/15"),
+        "options": {"expire_seconds": 900},
+    },
 }
 
 
@@ -669,14 +680,86 @@ STORAGES = {
 # CORS header.
 WHITENOISE_ALLOW_ALL_ORIGINS = False
 
-# Email. Nothing is sent. With DEBUG on, every message prints to the
-# console. With DEBUG off, every message is discarded, so no email body or
-# recipient reaches the logs. Issue #35 adds the real provider for staging
-# and production.
-if DEBUG:
+# Email (ADR 0016). Requests never send mail: allauth's adapter stores
+# each message as a QueuedEmail row and a task on the email queue sends it
+# (apps/emails). EMAIL_BACKEND is the Django backend path, passed through
+# as is. With DEBUG on and no value, every message prints to the console.
+# With DEBUG off, a value is required, and backends that print or keep
+# messages are refused (the list below): they would expose recipient
+# addresses and the verification and reset keys in the messages.
+#
+# Production sends through Resend with django-anymail:
+# EMAIL_BACKEND=anymail.backends.resend.EmailBackend and RESEND_API_KEY.
+# Switching to Amazon SES needs no code change: run
+# uv add "django-anymail[amazon-ses]", set
+# EMAIL_BACKEND=anymail.backends.amazon_ses.EmailBackend, and set boto3's
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_DEFAULT_REGION in the
+# environment (boto3 reads the region from AWS_DEFAULT_REGION, not
+# AWS_REGION). The SES backend uses boto3,
+# which ignores ANYMAIL_REQUESTS_TIMEOUT below. Without more, a slow SES
+# request reaches send_queued_email's soft time limit: the row is kept and
+# the sweep retries it about an hour later, with no backoff retry. To get
+# backoff retries for SES timeouts too, optionally add
+# ANYMAIL["AMAZON_SES_CLIENT_PARAMS"] = {"config": botocore.config.Config(
+#     connect_timeout=5, read_timeout=20, retries={"max_attempts": 1})}
+_REFUSED_EMAIL_BACKENDS_WITHOUT_DEBUG = frozenset(
+    {
+        "django.core.mail.backends.console.EmailBackend",
+        "django.core.mail.backends.filebased.EmailBackend",
+        "django.core.mail.backends.locmem.EmailBackend",
+        # anymail's own: console prints every message, test keeps them.
+        "anymail.backends.console.EmailBackend",
+        "anymail.backends.test.EmailBackend",
+    }
+)
+_RESEND_EMAIL_BACKEND = "anymail.backends.resend.EmailBackend"
+
+EMAIL_BACKEND = _raw("EMAIL_BACKEND").strip()
+if not EMAIL_BACKEND:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "Set the EMAIL_BACKEND environment variable when DJANGO_DEBUG is "
+            "off (see .env.example)."
+        )
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-else:
-    EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
+elif not DEBUG and EMAIL_BACKEND in _REFUSED_EMAIL_BACKENDS_WITHOUT_DEBUG:
+    raise ImproperlyConfigured(
+        "EMAIL_BACKEND must send email when DJANGO_DEBUG is off: a backend "
+        "that prints or keeps messages would expose addresses and keys."
+    )
+
+# anymail reads provider keys from this dict. Only Resend's is set here.
+ANYMAIL: dict[str, str] = {}
+_resend_api_key = _raw("RESEND_API_KEY").strip()
+if _resend_api_key:
+    ANYMAIL["RESEND_API_KEY"] = _resend_api_key
+elif not DEBUG and EMAIL_BACKEND == _RESEND_EMAIL_BACKEND:
+    raise ImproperlyConfigured(
+        "Set the RESEND_API_KEY environment variable when EMAIL_BACKEND is "
+        "Resend's and DJANGO_DEBUG is off (see .env.example)."
+    )
+
+# anymail's HTTP request timeout in seconds: 5 to connect, 20 for the
+# response. It must end well before send_queued_email's 60-second soft
+# time limit (apps/emails/tasks.py), so a slow provider is a timeout the
+# task retries with backoff, not a task cut off by its time limit.
+# anymail's default, 30 seconds for each, could reach that limit. It
+# applies only to anymail's requests-based backends, Resend among them;
+# SES uses boto3 (see the SES note above).
+ANYMAIL_REQUESTS_TIMEOUT = (5, 20)
+
+# The sender of every message, such as OPEN <noreply@example.org>. Its
+# domain must be verified with the provider. Required with DEBUG off.
+DEFAULT_FROM_EMAIL = (
+    _required("DEFAULT_FROM_EMAIL")
+    if not DEBUG
+    else _raw("DEFAULT_FROM_EMAIL").strip() or "OPEN <noreply@localhost>"
+)
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+# Seconds before an SMTP connection gives up, so a hung server cannot hold
+# a worker past the send task's time limit. anymail's HTTP backends have
+# their own timeout.
+EMAIL_TIMEOUT = 10
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

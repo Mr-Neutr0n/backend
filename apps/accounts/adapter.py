@@ -3,8 +3,10 @@
 from typing import TYPE_CHECKING, Any
 
 from allauth.account.adapter import DefaultAccountAdapter
+from allauth.core import context as allauth_context
 from django.contrib.auth import get_user_model
 from django.contrib.auth.base_user import AbstractBaseUser
+from django.contrib.sites.shortcuts import get_current_site
 from django.db import transaction
 from django.http import HttpRequest
 
@@ -13,6 +15,7 @@ from apps.accounts.validators import (
     normalize_email_address,
     normalized_email_errors,
 )
+from apps.emails.services import queue_email
 
 if TYPE_CHECKING:
     from allauth.account.models import EmailAddress
@@ -62,6 +65,28 @@ class AccountAdapter(DefaultAccountAdapter):
             return None
         user: AbstractBaseUser | None = super().authenticate(request, **credentials)
         return user
+
+    def send_mail(
+        self, template_prefix: str, email: str, context: dict[str, Any]
+    ) -> None:
+        """Queue every allauth email instead of sending it in the request.
+
+        The message is rendered here with allauth's own context (the
+        request, the address, the current site, then the flow's context),
+        as allauth's send_mail does, and stored by ``queue_email``. A task
+        on the email queue sends it after the transaction commits, so the
+        request never waits on the provider, and the address and any key
+        stay out of the task's arguments (ADR 0016).
+        """
+        request = allauth_context.request
+        ctx: dict[str, Any] = {
+            "request": request,
+            "email": email,
+            "current_site": get_current_site(request),
+        }
+        ctx.update(context)
+        message = self.render_mail(template_prefix, email, ctx)
+        queue_email(message, template=template_prefix)
 
     def send_password_reset_mail(
         self, user: AbstractBaseUser, email: str, context: dict[str, Any]

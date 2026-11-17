@@ -27,7 +27,11 @@ from apps.players.models import Player
 from apps.players.tests.factories import PlayerFactory
 from apps.public_ids.codes import CodeType, generate
 
-pytestmark = pytest.mark.django_db
+# Queued account email is sent when each request returns (ADR 0016).
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.usefixtures("commit_after_each_request"),
+]
 
 MATCHES = "/api/v1/matches/"
 PLAYED_ON = "2026-06-01"

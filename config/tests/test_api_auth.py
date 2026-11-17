@@ -26,7 +26,11 @@ from apps.accounts.tests.headless import (
     verify_from_last_mail,
 )
 
-pytestmark = pytest.mark.django_db
+# Queued account email is sent when each request returns (ADR 0016).
+pytestmark = [
+    pytest.mark.django_db,
+    pytest.mark.usefixtures("commit_after_each_request"),
+]
 
 ME = "/api/v1/accounts/me"
 EMAIL = "me.player@example.org"

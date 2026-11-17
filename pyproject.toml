@@ -7,6 +7,7 @@ dependencies = [
     "celery[redis]>=5.7.0",
     "django>=5.2,<5.3",
     "django-allauth[headless,headless-spec]>=65.22,<66",
+    "django-anymail[resend]>=15.2",
     "django-celery-beat>=2.9.0",
     "django-cors-headers>=4.9.0",
     "django-environ>=0.14.0",
@@ -104,6 +105,11 @@ module = ["allauth", "allauth.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# django-anymail ships no type information.
+module = ["anymail", "anymail.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # OPEN's allauth adapters, backend, and API auth subclass allauth's
 # untyped classes.
 module = [
@@ -156,6 +162,9 @@ addopts = ["--cov", "--cov-report=term-missing"]
 # WhiteNoise warns when STATIC_ROOT does not exist. Tests serve static
 # files without collectstatic, so the directory is usually missing.
 filterwarnings = ["ignore:No directory at:UserWarning"]
+markers = [
+    "hold_on_commit: keep on_commit callbacks a test client request registers, instead of running them when the request returns (apps/accounts/tests)",
+]
 
 [tool.coverage.run]
 source = ["apps", "config"]

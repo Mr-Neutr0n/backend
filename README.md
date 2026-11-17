@@ -4,7 +4,7 @@
 
 Backend services and APIs for [OPEN](https://github.com/openpickleball), the Open Pickleball Evaluation Network.
 
-> **Project status:** OPEN is in early development. This repository holds the project scaffold, the account model with sign-up, login, email verification, and password reset (django-allauth, headless, at `/_allauth/`), the append-only audit log, the OPEN Code scheme for public identifiers, the Player model with its privacy settings, the Club and Organizer models with organizer verification, partner OAuth applications (django-oauth-toolkit) with token and revoke endpoints at `/oauth/token/` and `/oauth/revoke_token/`, the Match, Match Participant, Game, Match Flag, and Match Confirmation models of the match ledger with score validation, duplicate detection, match submission permissions, and the confirmation workflow (confirm, dispute, void, correct, and expire), the API mount at `/api/v1/`, the Celery background task setup, static file serving and CORS for the API, a gunicorn configuration, and the local development services so far. The API's operations are the liveness and readiness checks, at `/api/v1/health/live` and `/api/v1/health/ready`, the signed-in Account at `/api/v1/accounts/me`, a player's own match submission at `/api/v1/matches/` with confirm and dispute at `/api/v1/matches/{code}/confirm` and `/dispute`, and a player's match history at `/api/v1/players/{code}/matches`. No OPEN rating is live.
+> **Project status:** OPEN is in early development. This repository holds the project scaffold, the account model with sign-up, login, email verification, and password reset (django-allauth, headless, at `/_allauth/`), the append-only audit log, the OPEN Code scheme for public identifiers, the Player model with its privacy settings, the Club and Organizer models with organizer verification, the email outbox that sends account email from the Celery `email` queue (Resend through django-anymail), partner OAuth applications (django-oauth-toolkit) with token and revoke endpoints at `/oauth/token/` and `/oauth/revoke_token/`, the Match, Match Participant, Game, Match Flag, and Match Confirmation models of the match ledger with score validation, duplicate detection, match submission permissions, and the confirmation workflow (confirm, dispute, void, correct, and expire), the API mount at `/api/v1/`, the Celery background task setup, static file serving and CORS for the API, a gunicorn configuration, and the local development services so far. The API's operations are the liveness and readiness checks, at `/api/v1/health/live` and `/api/v1/health/ready`, the signed-in Account at `/api/v1/accounts/me`, a player's own match submission at `/api/v1/matches/` with confirm and dispute at `/api/v1/matches/{code}/confirm` and `/dispute`, and a player's match history at `/api/v1/players/{code}/matches`. No OPEN rating is live.
 
 ## Technology
 
@@ -41,7 +41,7 @@ To run the app, start the development server:
 uv run python manage.py runserver
 ```
 
-The interactive API docs are then at http://127.0.0.1:8000/api/v1/docs, and the OpenAPI document is at http://127.0.0.1:8000/api/v1/openapi.json. For a quick check, http://127.0.0.1:8000/api/v1/health/live answers when the app is up. The account endpoints (sign-up, login, email verification, password reset) are documented at http://127.0.0.1:8000/_allauth/openapi.html. With `DJANGO_DEBUG` on, their emails print to the server's console.
+The interactive API docs are then at http://127.0.0.1:8000/api/v1/docs, and the OpenAPI document is at http://127.0.0.1:8000/api/v1/openapi.json. For a quick check, http://127.0.0.1:8000/api/v1/health/live answers when the app is up. The account endpoints (sign-up, login, email verification, password reset) are documented at http://127.0.0.1:8000/_allauth/openapi.html. With `DJANGO_DEBUG` on, their emails print to the Celery worker's console.
 
 ### Settings
 
@@ -108,7 +108,9 @@ CI runs lint, types, and tests on every pull request. The test job also runs `ma
 
 ### Email
 
-No email is sent yet. With `DJANGO_DEBUG` on, every message prints to the console. With it off, messages are discarded until #35 adds a real email provider.
+Requests never send email. Each message is stored in the email outbox and sent by a Celery task on the `email` queue after the transaction commits (ADR 0016), so run a worker to see it. With `DJANGO_DEBUG` on and `EMAIL_BACKEND` empty, the worker prints every message to its console. With `DJANGO_DEBUG` off, `EMAIL_BACKEND` and `DEFAULT_FROM_EMAIL` are required, and backends that print or keep messages are refused.
+
+Staging and production send through Resend with django-anymail: set `EMAIL_BACKEND=anymail.backends.resend.EmailBackend` and `RESEND_API_KEY`. To switch to Amazon SES, run `uv add "django-anymail[amazon-ses]"`, set `EMAIL_BACKEND=anymail.backends.amazon_ses.EmailBackend`, and set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION` in the environment. No code changes. The SES backend uses boto3, which ignores `ANYMAIL_REQUESTS_TIMEOUT`: without more, a slow SES request reaches the send task's 60-second soft time limit, and the sweep retries it about an hour later instead of a backoff retry. For backoff retries, you can optionally add `ANYMAIL["AMAZON_SES_CLIENT_PARAMS"] = {"config": Config(connect_timeout=5, read_timeout=20, retries={"max_attempts": 1})}` in settings, with `Config` from `botocore.config`.
 
 ## Test data
 

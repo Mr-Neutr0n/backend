@@ -109,6 +109,14 @@ class RoutingTests(SimpleTestCase):
     def test_email_task_goes_to_email(self) -> None:
         assert _queue_for("apps.emails.tasks.x") == "email"
 
+    def test_email_outbox_tasks_go_to_email(self) -> None:
+        for name in (
+            "apps.emails.tasks.send_queued_email",
+            "apps.emails.tasks.sweep_queued_emails",
+        ):
+            assert celery_app.tasks[name].name == name
+            assert _queue_for(name) == "email"
+
     def test_webhook_task_goes_to_webhooks(self) -> None:
         assert _queue_for("apps.webhooks.tasks.x") == "webhooks"
 

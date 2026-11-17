@@ -91,6 +91,10 @@ class ParallelSpawnTests(SimpleTestCase):
                 "CORS_ALLOWED_ORIGINS": "",
                 # https, since DEBUG is off.
                 "FRONTEND_URL": "https://app.example.org",
+                # DEBUG off needs a real email backend. Made-up key, never used.
+                "EMAIL_BACKEND": "anymail.backends.resend.EmailBackend",
+                "RESEND_API_KEY": "re_made_up_test_only_" + "x" * 16,
+                "DEFAULT_FROM_EMAIL": "OPEN <noreply@example.org>",
             }
             if "HOME" in os.environ:
                 env["HOME"] = os.environ["HOME"]
