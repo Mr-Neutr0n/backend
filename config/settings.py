@@ -194,14 +194,22 @@ def _cors_origins(name: str) -> list[str]:
     return origins
 
 
-def _frontend_url(name: str) -> str:
-    """Read a required exact origin, failing fast without echoing it."""
+def _frontend_url(name: str, *, require_https: bool) -> str:
+    """Read a required exact origin, failing fast without echoing it.
+
+    With require_https (DEBUG off), only an https origin is accepted.
+    """
     value = _required(name)
     if not _is_origin(value):
         raise ImproperlyConfigured(
             f"{name} is not an origin. Use an exact origin: a scheme (http or "
             "https), a host, and an optional port that is not the scheme's "
             "default, with no path or trailing slash (see .env.example)."
+        )
+    if require_https and not value.startswith("https://"):
+        raise ImproperlyConfigured(
+            f"{name} must use https when DJANGO_DEBUG is off: its links carry "
+            "email verification and password reset keys (see .env.example)."
         )
     return value
 
@@ -564,8 +572,10 @@ HEADLESS_ADAPTER = "apps.accounts.headless_adapter.HeadlessAdapter"
 HEADLESS_SERVE_SPECIFICATION = True
 # The web app's origin, for example https://app.example.org. Links in
 # account emails (verify an address, reset a password) open pages there.
-# Required, and an exact origin like a CORS_ALLOWED_ORIGINS entry.
-FRONTEND_URL = _frontend_url("FRONTEND_URL")
+# Required, and an exact origin like a CORS_ALLOWED_ORIGINS entry. With
+# DEBUG off it must be https, since the links carry verification and
+# password reset keys.
+FRONTEND_URL = _frontend_url("FRONTEND_URL", require_https=not DEBUG)
 # Pages of the web app that allauth's email links open. Each takes the key
 # from its path and posts it back to /_allauth/.
 HEADLESS_FRONTEND_URLS = {
