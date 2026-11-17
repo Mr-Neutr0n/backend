@@ -46,9 +46,12 @@ def _eager_retries(monkeypatch: pytest.MonkeyPatch) -> None:
 
     With task_eager_propagates on (the test setting), an eager run
     re-raises Celery's Retry instead of running the retry. Errors still
-    reach the test through the result's get().
+    reach the test through the result's get(). An eager retry also runs at
+    once, ignoring its countdown, while the row's lease holds until the
+    countdown ends; a zero countdown makes the retry due when it runs.
     """
     monkeypatch.setitem(send_queued_email.app.conf, "task_eager_propagates", False)
+    monkeypatch.setattr("apps.emails.tasks.retry_countdown", lambda retries: 0.0)
 
 
 @pytest.fixture(autouse=True)

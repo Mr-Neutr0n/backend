@@ -116,15 +116,19 @@ def _claim(queued_email_id: int) -> QueuedEmail | None:
     return row
 
 
-def _release(row: QueuedEmail) -> None:
-    """End the lease now, so the next retry can claim the row.
+def _release(row: QueuedEmail, countdown: float) -> None:
+    """Hold the lease until the retry is due, then let it lapse.
 
-    The attempt time moves back by one lease, not to empty: the retry can
-    claim the row at once, but the sweep still sees a recent attempt and
-    leaves the row to its retry chain until STUCK_AFTER passes. Every
-    countdown (at most MAX_COUNTDOWN) is far shorter than that.
+    The attempt time is set so the lease ends exactly ``countdown``
+    seconds from now: the retry, which runs no earlier than that, claims
+    the row, and any other task for it that arrives during the wait (a
+    sweep copy, or a message the broker redelivers) skips it, so a row
+    has one retry chain. The sweep also skips the row, since its attempt
+    time stays recent until well after the retry is due.
     """
-    QueuedEmail.objects.filter(pk=row.pk).update(last_attempt_at=timezone.now() - LEASE)
+    QueuedEmail.objects.filter(pk=row.pk).update(
+        last_attempt_at=timezone.now() - LEASE + timedelta(seconds=countdown)
+    )
 
 
 # Named explicitly: queued messages carry the name, so a rename or move
@@ -165,12 +169,13 @@ def send_queued_email(self: "Task[[int], None]", queued_email_id: int) -> None:
     error = type(failure).__name__
     status = _status(failure)
     if _is_retryable(failure) and self.request.retries < MAX_RETRIES:
-        _release(row)
+        countdown = retry_countdown(self.request.retries)
+        _release(row, countdown)
         raise self.retry(
             exc=EmailSendRetry(
                 f"queued email {row.pk} ({row.template}): {error}, status {status}"
             ),
-            countdown=retry_countdown(self.request.retries),
+            countdown=countdown,
         )
     if not _is_provider_error(failure):
         logger.error(
