@@ -1,10 +1,11 @@
 """OPEN's django-allauth account adapter (``ACCOUNT_ADAPTER``)."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from allauth.account.adapter import DefaultAccountAdapter
 from django.contrib.auth import get_user_model
 from django.contrib.auth.base_user import AbstractBaseUser
+from django.db import transaction
 from django.http import HttpRequest
 
 from apps.accounts.validators import (
@@ -12,6 +13,9 @@ from apps.accounts.validators import (
     normalize_email_address,
     normalized_email_errors,
 )
+
+if TYPE_CHECKING:
+    from allauth.account.models import EmailAddress
 
 
 class AccountAdapter(DefaultAccountAdapter):
@@ -69,3 +73,18 @@ class AccountAdapter(DefaultAccountAdapter):
             return
         stored = getattr(user, get_user_model().EMAIL_FIELD)
         self.send_mail("account/email/password_reset_key", stored, context)
+
+    def confirm_email(
+        self, request: HttpRequest, email_address: "EmailAddress"
+    ) -> bool:
+        """Verify an address in one transaction.
+
+        Verifying with ACCOUNT_CHANGE_EMAIL changes several rows: the old
+        primary EmailAddress, the new one, the Account's User.email, and
+        then removes the other addresses. If any write fails (the database
+        refuses a User.email that another Account took meanwhile), all of
+        them roll back, so User.email and the EmailAddress rows never split.
+        """
+        with transaction.atomic():
+            confirmed: bool = super().confirm_email(request, email_address)
+        return confirmed
