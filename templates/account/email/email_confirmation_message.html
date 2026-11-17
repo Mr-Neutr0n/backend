@@ -1,0 +1,8 @@
+{% extends "emails/base_message.html" %}
+{% block title %}Verify your email address for OPEN{% endblock title %}
+{% block content %}
+<p style="margin: 0 0 16px;">{% block intro %}Please verify your email address for OPEN.{% endblock intro %} Use the button below to verify it.</p>
+{% include "emails/action_link.html" with url=activate_url label="Verify email address" %}
+<p style="margin: 0;">If you did not expect this email, you can ignore it. The address stays unverified.</p>
+{% endblock content %}
+{% block reason %}You received this email because this email address is on an OPEN account but is not verified yet, and someone signed in with it, added it to the account, or asked for a new verification link.{% endblock reason %}

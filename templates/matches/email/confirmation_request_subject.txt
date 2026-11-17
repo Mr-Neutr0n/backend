@@ -1,0 +1,1 @@
+{% autoescape off %}{% if matches|length == 1 %}A match is waiting for your confirmation on OPEN{% else %}Matches waiting for your confirmation on OPEN{% endif %}{% endautoescape %}

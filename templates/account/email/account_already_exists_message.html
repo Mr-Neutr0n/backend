@@ -1,0 +1,8 @@
+{% extends "emails/base_message.html" %}
+{% block title %}You already have an OPEN account{% endblock title %}
+{% block content %}
+<p style="margin: 0 0 16px;">Someone tried to sign up for OPEN with this email address, but an OPEN account already uses it. If that was you, log in with this address instead. If you forgot your password, you can reset it with the button below.</p>
+{% include "emails/action_link.html" with url=password_reset_url label="Reset password" %}
+<p style="margin: 0;">If you did not try to sign up, you can ignore this email. Nothing on your account has changed.</p>
+{% endblock content %}
+{% block reason %}You received this email because someone tried to sign up for OPEN with this email address, and an OPEN account already uses it.{% endblock reason %}

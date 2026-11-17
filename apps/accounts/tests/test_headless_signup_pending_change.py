@@ -110,5 +110,5 @@ def test_signup_with_a_real_login_stays_enumeration_safe(base: str) -> None:
     assert response.status_code == 401
     assert get_user_model()._default_manager.count() == 1
     assert [message.to for message in mail.outbox] == [[A_EMAIL]]
-    assert mail.outbox[0].subject.endswith("Account Already Exists")
+    assert mail.outbox[0].subject == "You already have an OPEN account"
     assert VERIFY_PREFIX not in mail.outbox[0].body

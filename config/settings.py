@@ -395,7 +395,9 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        # OPEN's email templates. Searched before the app directories, so
+        # templates/account/email/ replaces allauth's own.
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -588,6 +590,9 @@ ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS = False
 # only a canonical address (is_canonical_email) and find the Account
 # through get_by_natural_key.
 ACCOUNT_ADAPTER = "apps.accounts.adapter.AccountAdapter"
+# Subjects are exactly the text of OPEN's templates (templates/account/
+# email/). allauth would otherwise prefix the request's host, "[host] ".
+ACCOUNT_EMAIL_SUBJECT_PREFIX = ""
 # Rate limits stay at allauth's defaults (#100 tunes them). They live in
 # the cache.
 
