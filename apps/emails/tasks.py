@@ -19,6 +19,7 @@ from anymail.exceptions import (
 )
 from celery import Task, shared_task
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.emails.models import QueuedEmail
@@ -35,6 +36,12 @@ MAX_RETRIES = 5
 MAX_COUNTDOWN = 600
 BASE_COUNTDOWN = 30
 JITTER = 30
+# The sweep deletes a row this old: allauth's keys have expired by then.
+EXPIRY = timedelta(days=3)
+# The sweep queues again a row that has waited this long with no send
+# attempt, such as one whose task never reached the broker.
+STUCK_AFTER = timedelta(hours=1)
+SWEEP_BATCH = 500
 
 
 class EmailSendRetry(Exception):
@@ -173,3 +180,39 @@ def send_queued_email(self: "Task[[int], None]", queued_email_id: int) -> None:
         status,
     )
     row.delete()
+
+
+@shared_task(
+    name="apps.emails.tasks.sweep_queued_emails",
+    soft_time_limit=120,
+    time_limit=180,
+)
+def sweep_queued_emails() -> dict[str, int]:
+    """Delete expired rows and queue stuck ones again.
+
+    Beat runs it every 15 minutes. A row created more than three days ago
+    is deleted, sent or not. A row older than an hour with no send attempt
+    in the last hour is queued again by id, in batches. Returns only the
+    two counts. Safe to run twice: the send task skips a row another run
+    holds, and does nothing for a row that is gone.
+    """
+    now = timezone.now()
+    deleted, _ = QueuedEmail.objects.filter(created_at__lt=now - EXPIRY).delete()
+    cutoff = now - STUCK_AFTER
+    stuck = (
+        QueuedEmail.objects.filter(created_at__lt=cutoff)
+        .filter(Q(last_attempt_at__isnull=True) | Q(last_attempt_at__lt=cutoff))
+        .order_by("pk")
+        .values_list("pk", flat=True)
+    )
+    requeued = 0
+    last_id = 0
+    while True:
+        batch = list(stuck.filter(pk__gt=last_id)[:SWEEP_BATCH])
+        if not batch:
+            break
+        for queued_email_id in batch:
+            send_queued_email.delay(queued_email_id)
+        requeued += len(batch)
+        last_id = batch[-1]
+    return {"deleted": deleted, "requeued": requeued}

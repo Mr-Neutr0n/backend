@@ -527,6 +527,13 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
         "options": {"expire_seconds": 3600},
     },
+    # Deletes queued emails older than three days and queues stuck ones
+    # again (ADR 0016). A run missed for 15 minutes is dropped.
+    "sweep-queued-emails": {
+        "task": "apps.emails.tasks.sweep_queued_emails",
+        "schedule": crontab(minute="*/15"),
+        "options": {"expire_seconds": 900},
+    },
 }
 
 
