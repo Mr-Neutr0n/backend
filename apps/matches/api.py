@@ -1,0 +1,160 @@
+"""First-party match endpoints at /api/v1/matches/ (issue #31).
+
+A signed-in player submits a match they played in. With no Event and no
+Club it is a self-submission (decision F1): it is created pending, and
+becomes confirmed once a player on each team confirms it. Score
+confirmation is a security-sensitive area (CLAUDE.md, hard rule 8), so
+every rule lives in the services these views call: ``record_match`` and
+``apps.matches.workflow``. The views only translate requests.
+
+Submission refuses an Account whose own Player is not on either team
+before it looks up any code or validates anything, so a refused submitter
+learns nothing about which codes exist. ``record_match`` checks again.
+
+Each service runs in its own transaction, never inside another one: their
+advisory locks last until the outermost transaction ends.
+
+No rule reads payment status: every player may submit and confirm every
+match (hard rule 7).
+"""
+
+from typing import TYPE_CHECKING
+
+from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.http import HttpRequest
+from ninja import Router, Status
+
+from apps.matches.models import Match
+from apps.matches.permissions import MatchPermissionDenied
+from apps.matches.schemas import MatchCreateIn, MatchOut, match_out, with_match_details
+from apps.matches.services import MatchIssue, MatchValidationError, record_match
+from apps.players.models import Player
+from apps.public_ids.codes import CodeType, normalize
+from config.api_errors import ErrorResponse
+from config.auth import account_auth
+
+if TYPE_CHECKING:
+    from django.contrib.auth.models import _User
+
+router = Router(tags=["matches"], auth=account_auth)
+
+UNKNOWN_PLAYER_MESSAGE = "No player has this OPEN Code."
+
+_BODY_FIELDS = frozenset(MatchCreateIn.model_fields)
+_TEAMS = ("team_a", "team_b")
+
+
+def request_account(request: HttpRequest) -> "_User":
+    """The signed-in Account, as a plain Account instance.
+
+    ``account_auth`` refuses everyone else. The session cookie path puts
+    Django's lazy ``request.user`` in ``request.auth``; the match services
+    read the actor's model class, so a lazy proxy is loaded again by id.
+    """
+    auth = request.auth  # type: ignore[attr-defined]
+    model = get_user_model()
+    if type(auth) is model:
+        return auth
+    return model.objects.get(pk=auth.pk)
+
+
+def _in_body(error: MatchValidationError) -> MatchValidationError:
+    """The error with each request field's issue located in the body.
+
+    Pydantic's own errors for this body are ``body.<field>``, so the
+    service's issues for the same fields get the same prefix (ADR 0005).
+    """
+    return MatchValidationError(
+        [
+            MatchIssue(f"body.{issue.field}", issue.code, issue.message)
+            if issue.field.split(".", 1)[0] in _BODY_FIELDS
+            else issue
+            for issue in error.issues
+        ]
+    )
+
+
+def _check_submitter_plays(account: "_User", payload: MatchCreateIn) -> None:
+    """Refuse an Account whose own Player is on neither team.
+
+    Runs before any code lookup or validation. A malformed code never
+    matches, so it cannot pass this check.
+    """
+    own_code = (
+        Player.objects.filter(account=account)
+        .values_list("public_code", flat=True)
+        .first()
+    )
+    submitted = {
+        normalize(raw, CodeType.PLAYER)
+        for team in _TEAMS
+        for raw in getattr(payload, team)
+    }
+    if own_code is None or own_code not in submitted:
+        raise MatchPermissionDenied
+
+
+def _resolve_teams(payload: MatchCreateIn) -> dict[str, list[Player]]:
+    """Each team's Players, in one query.
+
+    A malformed code and a code no Player has get the same issue, with
+    fixed text: the message never repeats what was sent.
+    """
+    codes = {
+        team: [normalize(raw, CodeType.PLAYER) for raw in getattr(payload, team)]
+        for team in _TEAMS
+    }
+    wanted = {code for team in codes.values() for code in team if code is not None}
+    found = {
+        player.public_code: player
+        for player in Player.objects.filter(public_code__in=wanted)
+    }
+    issues = [
+        MatchIssue(f"body.{team}.{index}", "unknown_player", UNKNOWN_PLAYER_MESSAGE)
+        for team in _TEAMS
+        for index, code in enumerate(codes[team])
+        if code is None or code not in found
+    ]
+    if issues:
+        raise MatchValidationError(issues)
+    return {
+        team: [found[code] for code in codes[team] if code is not None]
+        for team in _TEAMS
+    }
+
+
+def _loaded(match: Match) -> Match:
+    return with_match_details(Match.objects.filter(pk=match.pk)).get()
+
+
+_SUBMIT_RESPONSES = {201: MatchOut, 403: ErrorResponse, 409: ErrorResponse}
+
+
+@router.post("/", response=_SUBMIT_RESPONSES, operation_id="create_match")
+def create_match(request: HttpRequest, payload: MatchCreateIn) -> Status[MatchOut]:
+    """Submit a match you played in. It stays pending until both teams confirm.
+
+    Players are given by OPEN Code. A missing game target means 11, a
+    missing scoring type means side-out, and a missing best-of is inferred
+    from the games.
+    """
+    account = request_account(request)
+    _check_submitter_plays(account, payload)
+    teams = _resolve_teams(payload)
+    try:
+        with transaction.atomic():
+            recorded = record_match(
+                format=payload.format,
+                team_a=teams["team_a"],
+                team_b=teams["team_b"],
+                games=[(game.team_a, game.team_b) for game in payload.games],
+                played_on=payload.played_on,
+                best_of=payload.best_of,
+                game_target=payload.game_target,
+                scoring_type=payload.scoring_type,
+                submitted_by_user=account,
+            )
+    except MatchValidationError as error:
+        raise _in_body(error) from None
+    return Status(201, match_out(_loaded(recorded.match), account))
