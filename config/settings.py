@@ -278,15 +278,24 @@ CORS_ALLOWED_ORIGINS = _cors_origins("CORS_ALLOWED_ORIGINS")
 CORS_URLS_REGEX = r"^/(api|_allauth)/"
 # Never a wildcard, and never read from the environment.
 CORS_ALLOW_ALL_ORIGINS = False
-# Browsers send no cookies or session credentials cross-origin. Partner
-# clients authenticate with bearer tokens (issue #27). allauth's app
-# client, run in a browser on an allowed origin, sends its session token
-# in the X-Session-Token header, which CORS_ALLOW_HEADERS allows. allauth's
-# browser client uses the session cookie, so it works same-origin only
-# until #102 allows credentials for first-party origins.
+# Browsers send no cookies or session credentials cross-origin. What works
+# from an allowed origin:
+# - the OPEN API with no credentials (health checks, public operations);
+# - allauth's app client (/_allauth/app/ and /api/v1/ with its token): it
+#   sends its session token in X-Session-Token, and checks an emailed key
+#   with GET in X-Email-Verification-Key or X-Password-Reset-Key, all three
+#   allowed below.
+# Partner clients will use bearer tokens in Authorization (issue #27). The
+# browser client (/_allauth/browser/) uses the session cookie, so it works
+# same-origin only until #102 allows credentials for first-party origins.
 CORS_ALLOW_CREDENTIALS = False
-# corsheaders' default request headers, plus allauth's session token.
-CORS_ALLOW_HEADERS = (*default_headers, "x-session-token")
+# corsheaders' default request headers, plus the three allauth reads.
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "x-session-token",
+    "x-email-verification-key",
+    "x-password-reset-key",
+)
 
 # Valkey URL (redis:// or rediss://). The cache and Celery (issue #9)
 # read it from here.
