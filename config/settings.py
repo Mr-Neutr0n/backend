@@ -570,8 +570,12 @@ ACCOUNT_PASSWORD_RESET_BY_CODE_ENABLED = False
 # mailed to an address that has no Account.
 ACCOUNT_PREVENT_ENUMERATION = True
 ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS = False
-# OPEN's adapter normalizes and checks every email address allauth takes
-# in, with the same rules as the Account email field.
+# OPEN's adapter applies the Account email rules. Its clean_email
+# normalizes and checks a new address (sign-up, and adding an address)
+# with the same rules as the Account email field. Login (its authenticate)
+# and the password reset request (apps/accounts/headless_views.py) accept
+# only a canonical address (is_canonical_email) and find the Account
+# through get_by_natural_key.
 ACCOUNT_ADAPTER = "apps.accounts.adapter.AccountAdapter"
 # Rate limits stay at allauth's defaults (#100 tunes them). They live in
 # the cache.
