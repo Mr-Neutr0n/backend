@@ -27,6 +27,9 @@ REFUSED_BACKENDS = (
     CONSOLE_BACKEND,
     "django.core.mail.backends.filebased.EmailBackend",
     "django.core.mail.backends.locmem.EmailBackend",
+    # anymail's own: one prints every message, the other keeps them.
+    "anymail.backends.console.EmailBackend",
+    "anymail.backends.test.EmailBackend",
 )
 
 PRINT_EMAIL_SETTINGS = """
