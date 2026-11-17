@@ -514,11 +514,15 @@ MATCH_CONFIRMATION_EXPIRY_DAYS = _positive_days("MATCH_CONFIRMATION_EXPIRY_DAYS"
 # Accounts (django-allauth)
 # https://docs.allauth.org/en/latest/account/configuration.html
 
-# ModelBackend serves the Django admin login. OPEN's allauth backend serves
-# the headless login and finds an Account through the manager's
-# get_by_natural_key (ADR 0003), never a raw email match. Both check
-# is_active. A headless login that either one authenticates still goes
-# through allauth's login flow, which enforces email verification.
+# Django tries these in order. ModelBackend comes first and authenticates
+# every successful login, the Django admin's and allauth's headless login
+# alike: it finds the Account with the manager's get_by_natural_key
+# (ADR 0003). OPEN's allauth backend runs only when ModelBackend finds no
+# Account to log in. It looks Accounts up the same way, never through an
+# EmailAddress row, and stashes an inactive Account whose password matched,
+# so allauth answers "inactive" instead of "wrong password". Both check
+# is_active. A headless login still goes through allauth's login flow,
+# which enforces email verification.
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
     "apps.accounts.auth_backends.AuthenticationBackend",
@@ -631,7 +635,8 @@ STORAGES = {
 }
 
 # WhiteNoise would add Access-Control-Allow-Origin: * to every static
-# file. CORS covers /api/ paths only, so static files get no CORS header.
+# file. CORS covers /api/ and /_allauth/ paths only, so static files get no
+# CORS header.
 WHITENOISE_ALLOW_ALL_ORIGINS = False
 
 # Email. Nothing is sent. With DEBUG on, every message prints to the
