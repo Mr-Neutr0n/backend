@@ -32,7 +32,7 @@ allauth keeps its own `EmailAddress` table next to `accounts.User.email`, and it
 
 - iOS and Android apps use the app client. A web app can use the app client from any allowed origin, or the browser client same-origin. A session token kept in browser storage is exposed to any injected script, so the browser client is the safer choice for web once #102 lands.
 - Email links open web pages. Opening them in the mobile apps needs Universal Links and App Links on the `FRONTEND_URL` domain, which is the apps' work.
-- Until #35 adds a real email provider, a deployment with DEBUG off discards mail, so nobody can verify an address or log in through allauth there.
+- Until #35, a deployment with DEBUG off discarded mail, so nobody could verify an address or log in through allauth there. ADR 0016 adds a real provider (Resend) and sends account email from the email queue.
 - An Account made with `createsuperuser` or the admin has no `EmailAddress` row. Its first headless login creates one, unverified, and asks for verification.
 - The Django admin login does not check email verification, so a staff Account's admin session also authenticates `account_auth`. Staff Accounts are made by operators.
 - A login typed with the Kelvin sign (U+212A) for a `k` still logs in. allauth's email field lowercases it to ASCII before OPEN's check, so it reaches the same Account that ADR 0003's normalization maps it to. It needs the password, stores nothing, and a reset with it mails only the stored address. This is accepted.
