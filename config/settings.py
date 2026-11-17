@@ -693,8 +693,9 @@ WHITENOISE_ALLOW_ALL_ORIGINS = False
 # Switching to Amazon SES needs no code change: run
 # uv add "django-anymail[amazon-ses]", set
 # EMAIL_BACKEND=anymail.backends.amazon_ses.EmailBackend, and set boto3's
-# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION (or
-# AWS_DEFAULT_REGION) in the environment. The SES backend uses boto3,
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_DEFAULT_REGION in the
+# environment (boto3 reads the region from AWS_DEFAULT_REGION, not
+# AWS_REGION). The SES backend uses boto3,
 # which ignores ANYMAIL_REQUESTS_TIMEOUT below. Without more, a slow SES
 # request reaches send_queued_email's soft time limit: the row is kept and
 # the sweep retries it about an hour later, with no backoff retry. To get
