@@ -110,6 +110,7 @@ module = [
     "apps.accounts.adapter",
     "apps.accounts.auth_backends",
     "apps.accounts.headless_adapter",
+    "apps.accounts.headless_views",
     "config.auth",
 ]
 disallow_subclassing_any = false
