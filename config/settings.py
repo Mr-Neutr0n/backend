@@ -732,6 +732,13 @@ elif not DEBUG and EMAIL_BACKEND == _RESEND_EMAIL_BACKEND:
         "Resend's and DJANGO_DEBUG is off (see .env.example)."
     )
 
+# anymail's HTTP request timeout in seconds: 5 to connect, 20 for the
+# response. It must end well before send_queued_email's 60-second soft
+# time limit (apps/emails/tasks.py), so a slow provider is a timeout the
+# task retries with backoff, not a task cut off by its time limit.
+# anymail's default, 30 seconds for each, could reach that limit.
+ANYMAIL_REQUESTS_TIMEOUT = (5, 20)
+
 # The sender of every message, such as OPEN <noreply@example.org>. Its
 # domain must be verified with the provider. Required with DEBUG off.
 DEFAULT_FROM_EMAIL = (
