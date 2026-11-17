@@ -50,6 +50,7 @@ from ninja.schema import NinjaGenerateJsonSchema
 
 from apps.accounts.api import router as accounts_router
 from apps.matches.api import router as matches_router
+from apps.players.api import router as players_router
 from config.api_errors import (
     UNAUTHORIZED_STATUS,
     VALIDATION_ERROR_STATUS,
@@ -193,3 +194,4 @@ api = OpenNinjaAPI(
 api.add_router("health/", health_router)
 api.add_router("accounts/", accounts_router)
 api.add_router("matches/", matches_router)
+api.add_router("players/", players_router)
