@@ -114,6 +114,19 @@ No email is sent yet. With `DJANGO_DEBUG` on, every message prints to the consol
 
 Use only made-up or properly de-identified data. Do not put real player names, contact details, or match histories in this repository, including in test fixtures and screenshots. To build test records, prefer the factory_boy factories, such as `UserFactory` in `apps/accounts/tests/factories.py`, which fill in made-up Faker data on example domains.
 
+### Seed a development database
+
+To fill a local database with made-up records, run the seed command with `DJANGO_DEBUG` on:
+
+```bash
+uv run python manage.py migrate
+uv run python manage.py seed_dev_data --players 20
+```
+
+It adds two Clubs, two verified Organizers with one Event each, the Players you ask for (`--players`, default 20, at least 4), and twice as many confirmed singles and doubles Matches. Every name comes from Faker, and every email is on a reserved example domain. Each run adds a new set of records alongside the old ones. The command refuses to run with `DJANGO_DEBUG` off, and it needs the development dependencies that `uv sync` installs.
+
+The audit log is append-only, so `flush` cannot empty a seeded database. To start over, run `docker compose down -v`, then `docker compose up -d --wait` and `migrate`.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for this repository's workflow: branches and pull requests, code style, tests, and migrations. It adds to the organization [contributing guide](https://github.com/openpickleball/.github/blob/main/CONTRIBUTING.md). Every commit must be signed off. Please report security problems privately, as described in the [security policy](https://github.com/openpickleball/.github/blob/main/SECURITY.md).
