@@ -359,11 +359,8 @@ def test_create_operation_documents_only_first_party_fields() -> None:
 
 # Confirming and disputing a match.
 
-CHANGE_FORBIDDEN = {
-    "code": "forbidden",
-    "message": "You are not allowed to change this match.",
-    "errors": [],
-}
+# A refused actor gets the unknown-code 404 (ADR 0008).
+NOT_FOUND = {"code": "not_found", "message": "Not found.", "errors": []}
 CONFLICT = {
     "code": "conflict",
     "message": "This match cannot make this change in its current status.",
@@ -412,25 +409,25 @@ def test_code_is_read_in_any_case(pending: Match, players: list[Player]) -> None
 
 
 @pytest.mark.parametrize("action", ["confirm", "dispute"])
-def test_non_participant_gets_403(
+def test_non_participant_gets_404(
     pending: Match, players: list[Player], action: str
 ) -> None:
     outsider = PlayerFactory.create()
 
     response = act(signed_in(outsider.account), pending.public_code, action)
 
-    assert response.status_code == 403
-    assert response.json() == CHANGE_FORBIDDEN
+    assert response.status_code == 404
+    assert response.json() == NOT_FOUND
     pending.refresh_from_db()
     assert pending.status == MatchStatus.PENDING
 
 
 @pytest.mark.parametrize("action", ["confirm", "dispute"])
-def test_account_without_player_gets_403(pending: Match, action: str) -> None:
+def test_account_without_player_gets_404(pending: Match, action: str) -> None:
     response = act(signed_in(UserFactory.create()), pending.public_code, action)
 
-    assert response.status_code == 403
-    assert response.json() == CHANGE_FORBIDDEN
+    assert response.status_code == 404
+    assert response.json() == NOT_FOUND
 
 
 @pytest.mark.parametrize("action", ["confirm", "dispute"])
@@ -521,4 +518,5 @@ def test_confirm_and_dispute_are_documented() -> None:
     for action in ("confirm", "dispute"):
         operation = paths[f"{MATCHES}{{code}}/{action}"]["post"]
         assert operation["operationId"] == f"{action}_match"
-        assert set(operation["responses"]) >= {"200", "401", "403", "404", "409"}
+        assert set(operation["responses"]) >= {"200", "401", "404", "409"}
+        assert "403" not in operation["responses"]

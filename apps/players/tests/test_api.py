@@ -26,11 +26,8 @@ from apps.players.tests.factories import PlayerFactory
 pytestmark = pytest.mark.django_db
 
 FIRST_DAY = date(2026, 3, 2)
-PRIVATE = {
-    "code": "forbidden",
-    "message": "This player's match history is private.",
-    "errors": [],
-}
+# A hidden history gets the unknown-code 404 (ADR 0008).
+NOT_FOUND = {"code": "not_found", "message": "Not found.", "errors": []}
 
 
 def signed_in(account: Any) -> Client:
@@ -154,7 +151,7 @@ def test_account_without_a_player_sees_confirmed_matches(
     assert _codes(response) == [every_status["confirmed"].public_code]
 
 
-def test_private_history_is_403_to_others(
+def test_private_history_is_404_to_others(
     players: list[Player], every_status: dict[str, Match]
 ) -> None:
     PlayerPrivacy.objects.filter(player=players[0]).update(
@@ -163,8 +160,8 @@ def test_private_history_is_403_to_others(
 
     response = history(signed_in(players[1].account), players[0].public_code)
 
-    assert response.status_code == 403
-    assert response.json() == PRIVATE
+    assert response.status_code == 404
+    assert response.json() == NOT_FOUND
 
 
 def test_private_history_is_still_shown_to_the_player(
@@ -180,15 +177,15 @@ def test_private_history_is_still_shown_to_the_player(
     assert response.json()["count"] == 4
 
 
-def test_history_of_a_player_whose_account_is_inactive_is_403(
+def test_history_of_a_player_whose_account_is_inactive_is_404(
     players: list[Player], every_status: dict[str, Match]
 ) -> None:
     get_user_model().objects.filter(pk=players[0].account_id).update(is_active=False)
 
     response = history(signed_in(players[1].account), players[0].public_code)
 
-    assert response.status_code == 403
-    assert response.json() == PRIVATE
+    assert response.status_code == 404
+    assert response.json() == NOT_FOUND
 
 
 def test_inactive_opponent_shows_as_private_player(
@@ -285,7 +282,8 @@ def test_history_is_documented() -> None:
     operation = document["paths"]["/api/v1/players/{code}/matches"]["get"]
 
     assert operation["operationId"] == "list_player_matches"
-    assert set(operation["responses"]) >= {"200", "401", "403", "404", "422"}
+    assert set(operation["responses"]) >= {"200", "401", "404", "422"}
+    assert "403" not in operation["responses"]
     params = {param["name"]: param["schema"] for param in operation["parameters"]}
     assert params["limit"]["default"] == 20
     assert (params["limit"]["minimum"], params["limit"]["maximum"]) == (1, 100)

@@ -11,6 +11,12 @@ Submission refuses an Account whose own Player is not on either team
 before it looks up any code or validates anything, so a refused submitter
 learns nothing about which codes exist. ``record_match`` checks again.
 
+Confirm and dispute answer an actor the workflow refuses
+(``MatchActionDenied``) with the same 404 as an unknown or malformed
+code, so the response never reveals that the match exists (ADR 0008).
+A participant whose change the match's status does not allow still gets
+409.
+
 Each service runs in its own transaction, never inside another one: their
 advisory locks last until the outermost transaction ends.
 
@@ -18,16 +24,17 @@ No rule reads payment status: every player may submit and confirm every
 match (hard rule 7).
 """
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.http import HttpRequest
+from django.http import Http404, HttpRequest
 from ninja import Router, Status
 
 from apps.matches import workflow
 from apps.matches.models import Match
-from apps.matches.permissions import MatchPermissionDenied
+from apps.matches.permissions import MatchActionDenied, MatchPermissionDenied
 from apps.matches.schemas import MatchCreateIn, MatchOut, match_out, with_match_details
 from apps.matches.services import MatchIssue, MatchValidationError, record_match
 from apps.players.models import Player
@@ -164,12 +171,26 @@ def create_match(request: HttpRequest, payload: MatchCreateIn) -> Status[MatchOu
     return Status(201, match_out(_loaded(recorded.match), account))
 
 
-_CHANGE_RESPONSES = {
-    200: MatchOut,
-    403: ErrorResponse,
-    404: ErrorResponse,
-    409: ErrorResponse,
-}
+_CHANGE_RESPONSES = {200: MatchOut, 404: ErrorResponse, 409: ErrorResponse}
+
+
+def _change(
+    request: HttpRequest,
+    code: str,
+    service: Callable[..., Match],
+) -> MatchOut:
+    """Run a workflow change as the signed-in Account and return the match.
+
+    A refused actor gets the unknown-code 404, never a 403.
+    """
+    account = request_account(request)
+    match = get_by_public_code(Match.objects.all(), code)
+    try:
+        with transaction.atomic():
+            service(match, actor=account)
+    except MatchActionDenied:
+        raise Http404 from None
+    return match_out(_loaded(match), account)
 
 
 @router.post(
@@ -180,13 +201,10 @@ def confirm_match(request: HttpRequest, code: MatchCode) -> MatchOut:
 
     A pending match becomes confirmed once a player on each team confirms
     it. Confirming again changes nothing. A disputed or voided match
-    cannot be confirmed (409).
+    cannot be confirmed (409). Anyone who did not play in the match gets
+    404, as for an unknown code.
     """
-    account = request_account(request)
-    match = get_by_public_code(Match.objects.all(), code)
-    with transaction.atomic():
-        workflow.confirm_match(match, actor=account)
-    return match_out(_loaded(match), account)
+    return _change(request, code, workflow.confirm_match)
 
 
 @router.post(
@@ -196,10 +214,7 @@ def dispute_match(request: HttpRequest, code: MatchCode) -> MatchOut:
     """Dispute a match you played in. A moderator then reviews it.
 
     Disputing again changes nothing. A voided match cannot be disputed
-    (409).
+    (409). Anyone who did not play in the match gets 404, as for an
+    unknown code.
     """
-    account = request_account(request)
-    match = get_by_public_code(Match.objects.all(), code)
-    with transaction.atomic():
-        workflow.dispute_match(match, actor=account)
-    return match_out(_loaded(match), account)
+    return _change(request, code, workflow.dispute_match)
