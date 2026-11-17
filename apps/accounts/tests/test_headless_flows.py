@@ -10,11 +10,13 @@ from typing import Any
 import pytest
 from allauth.account.models import EmailAddress
 from django.core import mail
+from django.core.cache import cache
 from django.test import Client
 
 from apps.accounts.tests.headless import (
     APP,
     BROWSER,
+    FRONTEND_URL,
     NEW_PASSWORD,
     PASSWORD,
     RESET_PREFIX,
@@ -55,9 +57,13 @@ def test_app_signup_sends_one_verification_link_to_the_frontend() -> None:
 def test_app_login_before_verifying_is_refused() -> None:
     client = Client()
     signup(client, APP, EMAIL)
+    mail.outbox.clear()
 
     response = login(Client(), APP, EMAIL)
 
+    # The signup mail just went out, and allauth sends one verification
+    # mail per address every 3 minutes, so the login sends none.
+    assert mail.outbox == []
     assert response.status_code == 401
     body = response.json()
     assert body["meta"]["is_authenticated"] is False
@@ -210,9 +216,17 @@ def test_password_reset_for_an_unknown_address_looks_the_same_and_sends_nothing(
 
 def test_signup_with_a_taken_address_looks_like_a_new_signup() -> None:
     _verified_account()
+    # The verification mail used up the address's send limit.
+    cache.clear()
 
     response = signup(Client(), APP, EMAIL.upper())
 
     assert response.status_code == 401
     assert _pending_flows(response.json()) == ["verify_email"]
     assert EmailAddress.objects.count() == 1
+    # The owner is told an account exists, and gets no verification link.
+    assert len(mail.outbox) == 1
+    assert mail.outbox[0].to == [EMAIL]
+    assert mail.outbox[0].subject.endswith("Account Already Exists")
+    assert VERIFY_PREFIX not in mail.outbox[0].body
+    assert f"{FRONTEND_URL}/account/password/reset" in mail.outbox[0].body

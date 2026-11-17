@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from django.core import mail
 from django.core.cache import cache
 from django.test import Client
 from openapi_spec_validator import validate
@@ -94,11 +95,15 @@ def test_pending_login_token_gets_401() -> None:
     # AC-A: before the address is verified, login leaves a pending flow and
     # its token does not authenticate.
     signup(Client(), APP, EMAIL)
+    mail.outbox.clear()
     pending = login(Client(), APP, EMAIL).json()["meta"]["session_token"]
 
     response = Client().get(ME, headers=app_headers(pending))
 
     assert response.status_code == 401
+    # The signup mail just went out, so the login sends none (allauth sends
+    # one verification mail per address every 3 minutes).
+    assert mail.outbox == []
 
 
 def test_token_after_logout_gets_401() -> None:

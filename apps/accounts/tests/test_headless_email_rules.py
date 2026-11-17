@@ -17,9 +17,11 @@ from apps.accounts.tests.headless import (
     APP,
     BROWSER,
     PASSWORD,
+    VERIFY_PREFIX,
     app_headers,
     browser_client,
     csrf_header,
+    link_in_last_mail,
     login,
     post,
     signup,
@@ -56,6 +58,9 @@ def test_signup_stores_the_normalized_address(base: str) -> None:
     assert address.email == "info@example.org"
     assert address.primary
     assert not address.verified
+    assert len(mail.outbox) == 1
+    assert mail.outbox[0].to == ["info@example.org"]
+    assert link_in_last_mail(VERIFY_PREFIX).startswith(VERIFY_PREFIX)
 
 
 @pytest.mark.parametrize("base", [APP, BROWSER])
