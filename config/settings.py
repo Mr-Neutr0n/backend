@@ -684,8 +684,8 @@ WHITENOISE_ALLOW_ALL_ORIGINS = False
 # each message as a QueuedEmail row and a task on the email queue sends it
 # (apps/emails). EMAIL_BACKEND is the Django backend path, passed through
 # as is. With DEBUG on and no value, every message prints to the console.
-# With DEBUG off, a value is required, and the console, file, and
-# in-memory backends are refused: they would print or keep recipient
+# With DEBUG off, a value is required, and backends that print or keep
+# messages are refused (the list below): they would expose recipient
 # addresses and the verification and reset keys in the messages.
 #
 # Production sends through Resend with django-anymail:
@@ -700,6 +700,9 @@ _REFUSED_EMAIL_BACKENDS_WITHOUT_DEBUG = frozenset(
         "django.core.mail.backends.console.EmailBackend",
         "django.core.mail.backends.filebased.EmailBackend",
         "django.core.mail.backends.locmem.EmailBackend",
+        # anymail's own: console prints every message, test keeps them.
+        "anymail.backends.console.EmailBackend",
+        "anymail.backends.test.EmailBackend",
     }
 )
 _RESEND_EMAIL_BACKEND = "anymail.backends.resend.EmailBackend"
@@ -714,8 +717,8 @@ if not EMAIL_BACKEND:
     EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 elif not DEBUG and EMAIL_BACKEND in _REFUSED_EMAIL_BACKENDS_WITHOUT_DEBUG:
     raise ImproperlyConfigured(
-        "EMAIL_BACKEND must send email when DJANGO_DEBUG is off: the console, "
-        "file, and in-memory backends would keep addresses and keys."
+        "EMAIL_BACKEND must send email when DJANGO_DEBUG is off: a backend "
+        "that prints or keeps messages would expose addresses and keys."
     )
 
 # anymail reads provider keys from this dict. Only Resend's is set here.
