@@ -3,6 +3,6 @@
 {% block content %}
 <p style="margin: 0 0 16px;">{% block intro %}Please verify your email address for OPEN.{% endblock intro %} Use the button below to verify it.</p>
 {% include "emails/action_link.html" with url=activate_url label="Verify email address" %}
-<p style="margin: 0;">If you did not ask for this, you can ignore this email. The address stays unverified.</p>
+<p style="margin: 0;">If you did not expect this email, you can ignore it. The address stays unverified.</p>
 {% endblock content %}
-{% block reason %}You received this email because someone entered this email address on OPEN and asked to verify it.{% endblock reason %}
+{% block reason %}You received this email because this email address is on an OPEN account but is not verified yet, and someone signed in with it, added it to the account, or asked for a new verification link.{% endblock reason %}
