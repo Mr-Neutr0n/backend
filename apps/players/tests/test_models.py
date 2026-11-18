@@ -226,14 +226,20 @@ def test_birth_month_in_the_future_is_refused() -> None:
     assert str(year) not in text
 
 
-def test_birth_month_this_month_is_accepted() -> None:
+def test_birth_month_this_month_is_not_in_the_future() -> None:
+    # Not future, though under 13, so the age rule refuses it (issue #114).
     today = timezone.localdate()
     player = Player(
         account=UserFactory.create(),
         **_valid(birth_year=today.year, birth_month=today.month),
     )
 
-    player.full_clean()
+    with pytest.raises(ValidationError) as caught:
+        player.full_clean()
+
+    assert caught.value.message_dict == {
+        "birth_month": ["This birth year and month can't be used."]
+    }
 
 
 @pytest.mark.parametrize(

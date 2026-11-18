@@ -14,6 +14,7 @@ from django.test import Client
 
 from apps.accounts.adapter import AccountAdapter
 from apps.accounts.tests.headless import (
+    ADULT_BIRTH,
     APP,
     BROWSER,
     PASSWORD,
@@ -47,7 +48,7 @@ def _signup(base: str, email: str) -> Any:
     return post(
         client,
         f"{BROWSER}/auth/signup",
-        {"email": email, "password": PASSWORD},
+        {"email": email, "password": PASSWORD, **ADULT_BIRTH},
         **csrf_header(client),
     )
 

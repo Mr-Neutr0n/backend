@@ -566,9 +566,13 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # The email address is the login, and an Account has exactly one
-# (ADR 0003). Sign-up asks for an email and a password, nothing else.
+# (ADR 0003). Sign-up asks for an email and a password, and the age
+# screen's birth year and month.
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*"]
+# The age screen: sign-up also requires a birth year and month, and OPEN's
+# sign-up view refuses anyone under 13 (issue #114, ADR 0017).
+ACCOUNT_SIGNUP_FORM_CLASS = "apps.accounts.forms.SignupAgeForm"
 ACCOUNT_USER_MODEL_USERNAME_FIELD = None
 ACCOUNT_UNIQUE_EMAIL = True
 # Changing the address replaces it instead of adding a second one.

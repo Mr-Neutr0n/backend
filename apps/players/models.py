@@ -1,8 +1,10 @@
 """Players and their privacy settings. See ADR 0002 and ADR 0009.
 
 Create a Player through ``apps.players.services.create_player``, which
-also creates its PlayerPrivacy row. Only the player changes these fields
-and settings, through the services in that module.
+also creates its PlayerPrivacy row. When the birth year or month is set
+or changed, the player must be 13 or older (``apps.players.age``, issue
+#114). Only the player changes these fields and settings, through the
+services in that module.
 """
 
 import unicodedata
@@ -17,6 +19,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.players.age import is_old_enough
 from apps.public_ids.codes import CodeType
 from apps.public_ids.models import PublicCodeModel
 
@@ -226,6 +229,9 @@ class Player(PublicCodeModel):
         birth_changed = fields is None or not set(BIRTH_FIELDS).isdisjoint(fields)
         if birth_changed and self._birth_month_is_in_the_future():
             errors["birth_month"] = "The birth year and month cannot be in the future."
+        elif birth_changed and self._is_under_minimum_age():
+            # A fixed message, with no age in it (issue #114).
+            errors["birth_month"] = "This birth year and month can't be used."
         if errors:
             raise ValidationError(errors)
 
@@ -236,6 +242,14 @@ class Player(PublicCodeModel):
             return False
         today = timezone.localdate()
         return (year, month) > (today.year, today.month)
+
+    def _is_under_minimum_age(self) -> bool:
+        """Under 13 on the age limit date (``apps.players.age``)."""
+        year, month = self.birth_year, self.birth_month
+        if not _is_int(year) or not _is_int(month) or not 1 <= month <= 12:
+            # Field validation reports a missing or malformed value.
+            return False
+        return not is_old_enough(year, month)
 
 
 def normalize_input(name: str, value: object) -> object:

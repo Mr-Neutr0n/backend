@@ -14,6 +14,7 @@ from django.core.cache import cache
 from django.test import Client
 
 from apps.accounts.tests.headless import (
+    ADULT_BIRTH,
     APP,
     BROWSER,
     FRONTEND_URL,
@@ -133,7 +134,7 @@ def test_browser_flow_signup_verify_login_logout() -> None:
     signed_up = post(
         client,
         f"{BROWSER}/auth/signup",
-        {"email": EMAIL, "password": PASSWORD},
+        {"email": EMAIL, "password": PASSWORD, **ADULT_BIRTH},
         **csrf_header(client),
     )
     early = login(client, BROWSER, EMAIL, **csrf_header(client))

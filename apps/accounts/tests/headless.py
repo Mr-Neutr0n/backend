@@ -5,11 +5,13 @@ test client and the whole middleware stack.
 """
 
 import re
+from importlib import import_module
 from typing import Any
 from urllib.parse import unquote
 
 import pytest
 from django.conf import settings
+from django.contrib.sessions.backends.base import SessionBase
 from django.core import mail
 from django.http import HttpResponseBase
 from django.test import Client, TestCase
@@ -21,6 +23,8 @@ BROWSER = "/_allauth/browser/v1"
 FRONTEND_URL: str = settings.FRONTEND_URL
 PASSWORD = "made-up-Passw0rd-for-tests"
 NEW_PASSWORD = "another-made-up-Passw0rd-2"
+# The age screen's fields for a made-up adult (issue #114).
+ADULT_BIRTH = {"birth_year": 1990, "birth_month": 6}
 
 VERIFY_PREFIX = f"{FRONTEND_URL}/account/verify-email/"
 RESET_PREFIX = f"{FRONTEND_URL}/account/password/reset/key/"
@@ -36,8 +40,16 @@ def app_headers(token: str | None) -> dict[str, str]:
     return {"X-Session-Token": token} if token else {}
 
 
-def signup(client: Client, base: str, email: str, password: str = PASSWORD) -> Any:
-    return post(client, f"{base}/auth/signup", {"email": email, "password": password})
+def signup(
+    client: Client,
+    base: str,
+    email: str,
+    password: str = PASSWORD,
+    **headers: str,
+) -> Any:
+    """Sign up with a made-up adult birth year and month (issue #114)."""
+    data = {"email": email, "password": password, **ADULT_BIRTH}
+    return post(client, f"{base}/auth/signup", data, **headers)
 
 
 def login(
@@ -103,3 +115,42 @@ def run_on_commit_after_each_request(monkeypatch: pytest.MonkeyPatch) -> None:
         return response
 
     monkeypatch.setattr(ClientHandler, "__call__", call)
+
+
+# A made-up address for HeadlessSession.signup.
+SESSION_EMAIL = "age.player@example.org"
+
+
+class HeadlessSession:
+    """One headless client's session: a cookie jar or a session token."""
+
+    def __init__(self, base: str) -> None:
+        self.base = base
+        self.client = browser_client() if base == BROWSER else Client()
+        self.token: str | None = None
+
+    def post(self, endpoint: str, data: dict[str, Any]) -> Any:
+        if self.base == BROWSER:
+            headers = csrf_header(self.client)
+        else:
+            headers = app_headers(self.token)
+        response = post(self.client, f"{self.base}/{endpoint}", data, **headers)
+        if self.base == APP:
+            token = response.json().get("meta", {}).get("session_token")
+            if token:
+                self.token = token
+        return response
+
+    def signup(self, email: object = SESSION_EMAIL, **fields: object) -> Any:
+        data: dict[str, object] = {"email": email, "password": PASSWORD}
+        data.update(ADULT_BIRTH)
+        data.update(fields)
+        return self.post("auth/signup", {k: v for k, v in data.items() if v is not ...})
+
+    def store(self) -> SessionBase:
+        if self.base == BROWSER:
+            return self.client.session
+        store: SessionBase = import_module(settings.SESSION_ENGINE).SessionStore(
+            session_key=self.token
+        )
+        return store

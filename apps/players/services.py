@@ -17,7 +17,8 @@ from django.db import transaction
 
 from apps.audit.models import AuditAction
 from apps.audit.services import record_event, snapshot
-from apps.players.models import Player, PlayerPrivacy, normalize_input
+from apps.players.age import is_minor
+from apps.players.models import Player, PlayerPrivacy, Visibility, normalize_input
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import _User
@@ -48,12 +49,15 @@ def create_player(
     city: str | None = "",
     region: str | None = "",
 ) -> Player:
-    """Create a Player for ``account``, with default privacy settings.
+    """Create a Player for ``account``, with its privacy settings.
 
-    Raises ``ValidationError`` for an invalid or missing value, or when the
-    Account already has a Player. None for an optional text field means
-    empty. Records no Audit Event: creating a Player changes no privacy
-    setting. The 13-and-older rule is #114.
+    Raises ``ValidationError`` for an invalid or missing value, for a
+    player under 13 on the age limit date (``apps.players.age``), or when
+    the Account already has a Player. None for an optional text field means
+    empty. A player aged 13 to 17 starts with every privacy setting
+    ``PRIVATE``; an older one gets the model defaults. Turning 18 later
+    changes no setting. Records no Audit Event: creating a Player changes
+    no privacy setting.
     """
     with transaction.atomic():
         # Lock the Account row, so two calls for one Account run their
@@ -71,7 +75,11 @@ def create_player(
         )
         player.full_clean()
         player.save()
-        PlayerPrivacy.objects.create(player=player)
+        if is_minor(player.birth_year, player.birth_month):
+            private = dict.fromkeys(PlayerPrivacy.SETTINGS, Visibility.PRIVATE)
+            PlayerPrivacy.objects.create(player=player, **private)
+        else:
+            PlayerPrivacy.objects.create(player=player)
     return player
 
 

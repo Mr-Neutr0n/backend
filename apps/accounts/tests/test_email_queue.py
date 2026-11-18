@@ -21,6 +21,7 @@ from pytest_django import DjangoCaptureOnCommitCallbacks
 
 from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tests.headless import (
+    ADULT_BIRTH,
     APP,
     BROWSER,
     PASSWORD,
@@ -89,7 +90,7 @@ def test_signup_queues_the_verification_email(
         lambda: post(
             client,
             f"{base}/auth/signup",
-            {"email": EMAIL, "password": PASSWORD},
+            {"email": EMAIL, "password": PASSWORD, **ADULT_BIRTH},
             **headers,
         ),
     )
