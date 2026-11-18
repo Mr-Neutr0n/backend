@@ -64,3 +64,4 @@ Add each record here when it merges.
 - [0014. Headless account authentication](0014-headless-account-authentication.md) (issue #30)
 - [0015. First-party match endpoints](0015-first-party-match-endpoints.md) (issue #31)
 - [0016. Email through an outbox and the email queue](0016-email-outbox.md) (issue #35)
+- [0017. The signup age screen and the 13-and-older rule](0017-signup-age-screen.md) (issue #114)
