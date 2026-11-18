@@ -2,12 +2,12 @@
 
 from typing import Any
 
-from django.utils import timezone
-from factory.declarations import LazyFunction, SubFactory
+from factory.declarations import LazyFunction, SubFactory, Trait
 from factory.django import DjangoModelFactory
 from faker import Faker
 
 from apps.accounts.tests.factories import UserFactory
+from apps.players.age import age_limit_date
 from apps.players.models import GenderDivision, Player
 from apps.players.services import create_player
 
@@ -20,8 +20,16 @@ def _display_name() -> str:
 
 
 def _birth_year() -> int:
-    this_year = timezone.localdate().year
-    return _faker.random_int(min=this_year - 70, max=this_year - 18)
+    # 18 or older on every day of the year, so default privacy never flips
+    # to the minor's private default at random (issue #114).
+    this_year = age_limit_date().year
+    return _faker.random_int(min=this_year - 70, max=this_year - 19)
+
+
+def _minor_birth_year() -> int:
+    # 13 to 17 on every day of the year, whatever the month.
+    this_year = age_limit_date().year
+    return _faker.random_int(min=this_year - 17, max=this_year - 14)
 
 
 def _gender_division() -> str:
@@ -29,10 +37,17 @@ def _gender_division() -> str:
 
 
 class PlayerFactory(DjangoModelFactory[Player]):
-    """A Player created through ``create_player``, so it has its privacy row."""
+    """A Player created through ``create_player``, so it has its privacy row.
+
+    An adult by default. ``minor=True`` makes a player aged 13 to 17, who
+    starts with every privacy setting private.
+    """
 
     class Meta:
         model = Player
+
+    class Params:
+        minor = Trait(birth_year=LazyFunction(_minor_birth_year))  # type: ignore[no-untyped-call]
 
     # factory_boy's declarations carry no type hints.
     account = SubFactory(UserFactory)  # type: ignore[no-untyped-call]

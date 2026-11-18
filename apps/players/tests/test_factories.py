@@ -1,10 +1,10 @@
 """PlayerFactory makes valid Players through create_player, with made-up data."""
 
 import pytest
-from django.utils import timezone
 
 from apps.accounts.tests.factories import UserFactory
 from apps.audit.models import AuditEvent
+from apps.players.age import age_limit_date
 from apps.players.models import GenderDivision, Player, PlayerPrivacy, Visibility
 from apps.players.tests.factories import PlayerFactory
 
@@ -34,10 +34,10 @@ def test_each_player_gets_its_own_account() -> None:
 
 
 def test_values_are_in_range() -> None:
-    this_year = timezone.localdate().year
+    this_year = age_limit_date().year
 
     for player in PlayerFactory.create_batch(20):
-        assert this_year - 70 <= player.birth_year <= this_year - 18
+        assert this_year - 70 <= player.birth_year <= this_year - 19
         assert 1 <= player.birth_month <= 12
         assert player.gender_division in {"", *GenderDivision.values}
         assert player.display_name
