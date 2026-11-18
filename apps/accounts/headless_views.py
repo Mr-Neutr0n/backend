@@ -11,6 +11,14 @@ allauth's URLconf (`config/urls.py`).
 - Sign-up: an address is taken only when it is some Account's `User.email`
   (ADR 0003). allauth also counts every other EmailAddress row, so an
   address another Account had only added, unverified, blocked sign-up.
+- Sign-up age screen (issue #114, ADR 0017): the birth year and month
+  (`SignupAgeForm`) are checked before anything else. Under 13 gets one
+  fixed refusal, whatever the email and password, before allauth reads
+  them, so no lookup, Account, or mail results. The session is then
+  flagged, and every later sign-up in it gets the same refusal. Thirteen
+  and older signs up as before, and the age is held in the session, bound
+  to the new Account (or to none, for a taken address, so both answers
+  stay alike), for the Player create endpoint (#124).
 - Email verification: an address that is another Account's login cannot
   be verified (allauth's `email_taken`, a 400). allauth checks only other
   verified EmailAddress rows, so verifying would set the address as this
@@ -33,15 +41,24 @@ from allauth.headless.account.views import (
 from allauth.headless.account.views import SignupView as BaseSignupView
 from allauth.headless.account.views import VerifyEmailView as BaseVerifyEmailView
 from allauth.headless.constants import Client
+from allauth.headless.internal.restkit.response import ErrorResponse
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.urls import URLPattern, path
 
+from apps.accounts.forms import SignupAgeForm
 from apps.accounts.validators import is_canonical_email
+from apps.players.age import (
+    SIGNUP_BIRTH_SESSION_KEY,
+    SIGNUP_REFUSED_SESSION_KEY,
+    hold_signup_birth,
+    is_old_enough,
+)
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
-    from django.http import HttpRequest
+    from django.http import HttpRequest, HttpResponseBase
 
 
 def account_for_login(email: str) -> "AbstractBaseUser | None":
@@ -103,6 +120,24 @@ class SignupInput(BaseSignupInput):
         email: str = get_adapter().validate_unique_email(value)
         return email
 
+    def try_save(
+        self, request: "HttpRequest"
+    ) -> "tuple[AbstractBaseUser | None, HttpResponseBase | None]":
+        """allauth's save, then the age held for the new Account.
+
+        A taken address creates no Account, and its age is held bound to
+        none: both paths change the session alike, so the app client's
+        answers (a session token or not) stay the same (enumeration).
+        """
+        user, response = super().try_save(request)
+        hold_signup_birth(
+            request.session,
+            user,
+            self.cleaned_data["birth_year"],
+            self.cleaned_data["birth_month"],
+        )
+        return user, response
+
     def save(self, request: "HttpRequest") -> "AbstractBaseUser":
         user: AbstractBaseUser = super().save(request)
         # allauth's setup skips an address another Account's pending change
@@ -116,7 +151,54 @@ class SignupInput(BaseSignupInput):
 
 
 class SignupView(BaseSignupView):
+    """allauth's sign-up, behind the age screen (issue #114).
+
+    The age is checked in ``handle``, before allauth's input (and so its
+    email lookup) runs.
+    """
+
     input_class: ClassVar[dict[str, type[SignupInput]]] = {"POST": SignupInput}
+
+    def handle(
+        self, request: "HttpRequest", *args: object, **kwargs: object
+    ) -> "HttpResponseBase":
+        if request.method == "POST":
+            refused = self._screen_age(request)
+            if refused is not None:
+                return refused
+        response: HttpResponseBase = super().handle(request, *args, **kwargs)
+        return response
+
+    def _screen_age(self, request: "HttpRequest") -> "HttpResponseBase | None":
+        """A response that ends the sign-up, or None to go on."""
+        if request.session.get(SIGNUP_REFUSED_SESSION_KEY):
+            # Never reads the body: the answer depends on nothing sent.
+            return _refusal(request)
+        age = SignupAgeForm(data=self._parse_json(request) or {})
+        if not age.is_valid():
+            # allauth's 400, with only the age fields' errors.
+            invalid: HttpResponseBase = ErrorResponse(request, input=age)
+            return invalid
+        if not is_old_enough(
+            age.cleaned_data["birth_year"], age.cleaned_data["birth_month"]
+        ):
+            # A flag only, never the age (ADR 0009).
+            request.session.pop(SIGNUP_BIRTH_SESSION_KEY, None)
+            request.session[SIGNUP_REFUSED_SESSION_KEY] = True
+            return _refusal(request)
+        return None
+
+
+# One fixed answer, whatever was sent: no field, no age, no detail.
+_SIGNUP_REFUSED = "We can't create an account with these details."
+
+
+def _refusal(request: "HttpRequest") -> "HttpResponseBase":
+    """allauth's 400 for an under-13 sign-up, and for every later one in
+    the session. It carries no ``param``."""
+    error = ValidationError(_SIGNUP_REFUSED, code="signup_refused")
+    response: HttpResponseBase = ErrorResponse(request, exception=error)
+    return response
 
 
 def is_another_accounts_login(email: str, account_id: object) -> bool:

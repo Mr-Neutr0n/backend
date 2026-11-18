@@ -16,18 +16,27 @@ from django.contrib.sessions.backends.base import SessionBase
 from django.core import mail
 from django.test import Client
 
+from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tests.headless import (
     ADULT_BIRTH,
     APP,
     BROWSER,
     PASSWORD,
+    VERIFY_PREFIX,
     app_headers,
     browser_client,
     csrf_header,
+    key_from_link,
+    link_in_last_mail,
     post,
 )
 from apps.emails.models import QueuedEmail
-from apps.players.age import SIGNUP_REFUSED_SESSION_KEY
+from apps.players.age import (
+    SIGNUP_BIRTH_SESSION_KEY,
+    SIGNUP_REFUSED_SESSION_KEY,
+    age_limit_date,
+    take_signup_birth,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -56,7 +65,7 @@ class Session:
                 self.token = token
         return response
 
-    def signup(self, email: str = EMAIL, **fields: object) -> Any:
+    def signup(self, email: object = EMAIL, **fields: object) -> Any:
         data: dict[str, object] = {"email": email, "password": PASSWORD}
         data.update(ADULT_BIRTH)
         data.update(fields)
@@ -132,3 +141,305 @@ def test_spec_lists_the_age_fields_as_required() -> None:
 
     assert {"birth_year", "birth_month"} <= set(base_signup["required"])
     assert {"birth_year", "birth_month"} <= set(base_signup["properties"])
+
+
+# Under 13 is refused, neutrally, before anything else
+
+REFUSAL = [
+    {
+        "message": "We can't create an account with these details.",
+        "code": "signup_refused",
+    }
+]
+
+
+def _under_13() -> list[dict[str, int]]:
+    today = age_limit_date()
+    return [
+        {"birth_year": today.year - 12, "birth_month": 12},
+        {"birth_year": today.year - 5, "birth_month": 6},
+        {"birth_year": today.year, "birth_month": today.month},
+        # A future month.
+        {"birth_year": today.year + 1, "birth_month": 1},
+        {"birth_year": 10**9, "birth_month": 1},
+    ]
+
+
+def _shape(response: Any) -> dict[str, Any]:
+    """The response, with a session token's value replaced by its presence."""
+    body = dict(response.json())
+    meta = dict(body.get("meta", {}))
+    if "session_token" in meta:
+        meta["session_token"] = True
+    if meta:
+        body["meta"] = meta
+    return {"status_code": response.status_code, "body": body}
+
+
+def _assert_refused(response: Any) -> None:
+    assert response.status_code == 400
+    body = response.json()
+    assert body["status"] == 400
+    assert body["errors"] == REFUSAL
+
+
+def _assert_nothing_stored(accounts: int = 0, addresses: int = 0) -> None:
+    assert _accounts() == accounts
+    assert EmailAddress.objects.count() == addresses
+    assert not QueuedEmail.objects.exists()
+    assert mail.outbox == []
+
+
+@pytest.mark.parametrize("base", CLIENTS)
+@pytest.mark.parametrize("index", range(5))
+def test_under_13_is_refused(base: str, index: int) -> None:
+    session = Session(base)
+
+    response = session.signup(**_under_13()[index])
+
+    _assert_refused(response)
+    _assert_nothing_stored()
+    assert dict(session.store().items()) == {SIGNUP_REFUSED_SESSION_KEY: True}
+
+
+@pytest.mark.hold_on_commit
+@pytest.mark.parametrize("base", CLIENTS)
+def test_refusal_queues_no_email(base: str) -> None:
+    UserFactory.create(email="taken.player@example.org")
+    session = Session(base)
+
+    _assert_refused(session.signup("taken.player@example.org", **_under_13()[1]))
+    _assert_nothing_stored(accounts=1)
+
+
+@pytest.mark.parametrize("base", CLIENTS)
+def test_refusal_does_not_depend_on_the_email_or_password(base: str) -> None:
+    taken = UserFactory.create(email="taken.player@example.org")
+    EmailAddress.objects.create(user=taken, email=taken.email, verified=True)
+    young = _under_13()[1]
+    variants: list[dict[str, object]] = [
+        {"email": "taken.player@example.org"},
+        {"email": "new.player@example.org"},
+        {"email": "not-an-address"},
+        {"email": "weak.player@example.org", "password": "1"},
+        {"email": ...},
+        {"email": "new.player@example.org", "password": ...},
+    ]
+
+    shapes = [_shape(Session(base).signup(**young, **v)) for v in variants]
+
+    assert all(shape == shapes[0] for shape in shapes)
+    assert shapes[0]["body"]["errors"] == REFUSAL
+    _assert_nothing_stored(accounts=1, addresses=1)
+
+
+# The same session cannot retry
+
+
+@pytest.mark.parametrize("base", CLIENTS)
+@pytest.mark.parametrize(
+    "retry",
+    [
+        {},
+        {"email": "other.player@example.org"},
+        {"birth_month": 13},
+        {"birth_year": ..., "birth_month": ..., "email": ..., "password": ...},
+    ],
+)
+def test_a_refused_session_is_refused_again(base: str, retry: dict[str, Any]) -> None:
+    session = Session(base)
+    first = session.signup(**_under_13()[1])
+
+    again = session.signup(**retry)
+
+    _assert_refused(again)
+    assert _shape(again)["body"]["errors"] == _shape(first)["body"]["errors"]
+    _assert_nothing_stored()
+    assert dict(session.store().items()) == {SIGNUP_REFUSED_SESSION_KEY: True}
+
+
+def test_app_refusal_gives_a_token_that_carries_the_refusal() -> None:
+    session = Session(APP)
+
+    first = session.signup(**_under_13()[1])
+    token = first.json()["meta"]["session_token"]
+    again = session.signup()
+
+    assert token
+    assert session.token == token
+    _assert_refused(again)
+    assert "meta" not in again.json() or "session_token" not in again.json()["meta"]
+    _assert_nothing_stored()
+
+
+def test_app_refusal_in_a_session_that_had_a_token() -> None:
+    session = Session(APP)
+    session.signup("first.player@example.org")
+    token = session.token
+    mail.outbox.clear()
+
+    refused = session.signup("second.player@example.org", **_under_13()[1])
+    again = session.signup("third.player@example.org")
+
+    assert token
+    assert session.token == token
+    _assert_refused(refused)
+    _assert_refused(again)
+    assert _accounts() == 1
+    assert mail.outbox == []
+    stored = session.store()
+    assert stored[SIGNUP_REFUSED_SESSION_KEY] is True
+    assert SIGNUP_BIRTH_SESSION_KEY not in stored
+
+
+def test_a_fresh_session_is_not_refused() -> None:
+    Session(BROWSER).signup(**_under_13()[1])
+
+    response = Session(BROWSER).signup()
+
+    assert response.status_code == 401
+    assert _accounts() == 1
+
+
+# 13 and older signs up as before
+
+
+def _pending_flows(response: Any) -> list[str]:
+    flows = response.json()["data"]["flows"]
+    return [flow["id"] for flow in flows if flow.get("is_pending")]
+
+
+@pytest.mark.parametrize("base", CLIENTS)
+def test_13_or_older_signs_up_and_holds_the_age(base: str) -> None:
+    session = Session(base)
+    year = age_limit_date().year - 14
+
+    response = session.signup(birth_year=year, birth_month=1)
+
+    assert response.status_code == 401
+    assert _pending_flows(response) == ["verify_email"]
+    assert [message.to for message in mail.outbox] == [[EMAIL]]
+    account = get_user_model()._default_manager.get_by_natural_key(EMAIL)
+    stored = session.store()
+    assert stored[SIGNUP_BIRTH_SESSION_KEY] == {
+        "account": account.pk,
+        "year": year,
+        "month": 1,
+    }
+    assert SIGNUP_REFUSED_SESSION_KEY not in stored
+
+
+@pytest.mark.parametrize("base", CLIENTS)
+def test_taken_address_holds_the_age_with_no_account(base: str) -> None:
+    taken = UserFactory.create(email="taken.player@example.org")
+    EmailAddress.objects.create(user=taken, email=taken.email, verified=True)
+    session = Session(base)
+
+    response = session.signup("taken.player@example.org")
+
+    assert response.status_code == 401
+    assert session.store()[SIGNUP_BIRTH_SESSION_KEY] == {
+        "account": None,
+        "year": ADULT_BIRTH["birth_year"],
+        "month": ADULT_BIRTH["birth_month"],
+    }
+    assert _accounts() == 1
+
+
+def _outline(response: Any) -> dict[str, Any]:
+    body = response.json()
+    return {
+        "status": response.status_code,
+        "keys": sorted(body),
+        "meta": sorted(body["meta"]),
+        "flows": [flow["id"] for flow in body["data"]["flows"]],
+        "token": "session_token" in body["meta"],
+    }
+
+
+@pytest.mark.parametrize("base", CLIENTS)
+def test_new_and_taken_addresses_answer_alike(base: str) -> None:
+    taken = UserFactory.create(email="taken.player@example.org")
+    EmailAddress.objects.create(user=taken, email=taken.email, verified=True)
+
+    new = Session(base).signup("new.player@example.org")
+    existing = Session(base).signup("taken.player@example.org")
+
+    assert _outline(new) == _outline(existing)
+    assert _outline(new)["token"] is (base == APP)
+
+
+# The held age is handed over once, to the right Account
+
+
+def _verify_then_log_in(session: Session) -> Any:
+    """Verify by the emailed key, then log in, all in the signup's session.
+
+    Verifying by link does not log in (ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION
+    is off), so the client logs in next, in the same session.
+    """
+    key = key_from_link(link_in_last_mail(VERIFY_PREFIX), VERIFY_PREFIX)
+    verified = session.post("auth/email/verify", {"key": key})
+    assert verified.status_code == 401
+    assert verified.json()["meta"]["is_authenticated"] is False
+    logged_in = session.post("auth/login", {"email": EMAIL, "password": PASSWORD})
+    assert logged_in.status_code == 200
+    assert logged_in.json()["meta"]["is_authenticated"] is True
+    return logged_in
+
+
+@pytest.mark.parametrize("base", CLIENTS)
+def test_the_age_is_taken_once_after_verify_and_login(base: str) -> None:
+    session = Session(base)
+    session.signup()
+    before = session.store().session_key
+
+    _verify_then_log_in(session)
+
+    account = get_user_model()._default_manager.get_by_natural_key(EMAIL)
+    other = UserFactory.create()
+    stored = session.store()
+    # Login cycles the session key and keeps the session's data.
+    assert stored.session_key != before
+    assert take_signup_birth(stored, other) is None
+    assert take_signup_birth(stored, account) == (
+        ADULT_BIRTH["birth_year"],
+        ADULT_BIRTH["birth_month"],
+    )
+    assert take_signup_birth(stored, account) is None
+    stored.save()
+    assert take_signup_birth(session.store(), account) is None
+
+
+@pytest.mark.parametrize("base", CLIENTS)
+def test_a_login_to_another_account_never_gets_the_age(base: str) -> None:
+    other = UserFactory.create(email="other.player@example.org", password=PASSWORD)
+    EmailAddress.objects.create(user=other, email=other.email, verified=True)
+    session = Session(base)
+    session.signup()
+
+    logged_in = session.post(
+        "auth/login", {"email": "other.player@example.org", "password": PASSWORD}
+    )
+
+    assert logged_in.status_code == 200
+    assert take_signup_birth(session.store(), other) is None
+
+
+@pytest.mark.parametrize("base", CLIENTS)
+def test_logout_removes_the_held_age(base: str) -> None:
+    session = Session(base)
+    session.signup()
+    _verify_then_log_in(session)
+    assert SIGNUP_BIRTH_SESSION_KEY in session.store()
+    before = session.store().session_key
+
+    if base == BROWSER:
+        headers = csrf_header(session.client)
+    else:
+        headers = app_headers(session.token)
+    session.client.delete(f"{base}/auth/session", headers=headers)
+
+    assert SIGNUP_BIRTH_SESSION_KEY not in session.store()
+    store_class = import_module(settings.SESSION_ENGINE).SessionStore
+    assert not store_class().exists(before)
