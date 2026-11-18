@@ -320,6 +320,8 @@ INSTALLED_APPS = [
     "ninja",
     "django_celery_beat",
     "oauth2_provider",
+    # Project-wide management commands, including the OpenAPI schema export.
+    "config",
     # Sends email through a provider's API (Resend), chosen by EMAIL_BACKEND.
     "anymail",
     # Account sign-up, login, email verification, and password reset,
