@@ -12,7 +12,6 @@ import pytest
 from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.sessions.backends.base import SessionBase
 from django.core import mail
 from django.test import Client
 
@@ -23,12 +22,11 @@ from apps.accounts.tests.headless import (
     BROWSER,
     PASSWORD,
     VERIFY_PREFIX,
+    HeadlessSession,
     app_headers,
-    browser_client,
     csrf_header,
     key_from_link,
     link_in_last_mail,
-    post,
 )
 from apps.emails.models import QueuedEmail
 from apps.players.age import (
@@ -45,39 +43,7 @@ EMAIL = "age.player@example.org"
 MARKER = "8642097531"
 
 
-class Session:
-    """One headless client's session: a cookie jar or a session token."""
-
-    def __init__(self, base: str) -> None:
-        self.base = base
-        self.client = browser_client() if base == BROWSER else Client()
-        self.token: str | None = None
-
-    def post(self, endpoint: str, data: dict[str, Any]) -> Any:
-        if self.base == BROWSER:
-            headers = csrf_header(self.client)
-        else:
-            headers = app_headers(self.token)
-        response = post(self.client, f"{self.base}/{endpoint}", data, **headers)
-        if self.base == APP:
-            token = response.json().get("meta", {}).get("session_token")
-            if token:
-                self.token = token
-        return response
-
-    def signup(self, email: object = EMAIL, **fields: object) -> Any:
-        data: dict[str, object] = {"email": email, "password": PASSWORD}
-        data.update(ADULT_BIRTH)
-        data.update(fields)
-        return self.post("auth/signup", {k: v for k, v in data.items() if v is not ...})
-
-    def store(self) -> SessionBase:
-        if self.base == BROWSER:
-            return self.client.session
-        store: SessionBase = import_module(settings.SESSION_ENGINE).SessionStore(
-            session_key=self.token
-        )
-        return store
+Session = HeadlessSession
 
 
 def _accounts() -> int:

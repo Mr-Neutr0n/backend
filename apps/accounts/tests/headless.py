@@ -5,11 +5,13 @@ test client and the whole middleware stack.
 """
 
 import re
+from importlib import import_module
 from typing import Any
 from urllib.parse import unquote
 
 import pytest
 from django.conf import settings
+from django.contrib.sessions.backends.base import SessionBase
 from django.core import mail
 from django.http import HttpResponseBase
 from django.test import Client, TestCase
@@ -113,3 +115,42 @@ def run_on_commit_after_each_request(monkeypatch: pytest.MonkeyPatch) -> None:
         return response
 
     monkeypatch.setattr(ClientHandler, "__call__", call)
+
+
+# A made-up address for HeadlessSession.signup.
+SESSION_EMAIL = "age.player@example.org"
+
+
+class HeadlessSession:
+    """One headless client's session: a cookie jar or a session token."""
+
+    def __init__(self, base: str) -> None:
+        self.base = base
+        self.client = browser_client() if base == BROWSER else Client()
+        self.token: str | None = None
+
+    def post(self, endpoint: str, data: dict[str, Any]) -> Any:
+        if self.base == BROWSER:
+            headers = csrf_header(self.client)
+        else:
+            headers = app_headers(self.token)
+        response = post(self.client, f"{self.base}/{endpoint}", data, **headers)
+        if self.base == APP:
+            token = response.json().get("meta", {}).get("session_token")
+            if token:
+                self.token = token
+        return response
+
+    def signup(self, email: object = SESSION_EMAIL, **fields: object) -> Any:
+        data: dict[str, object] = {"email": email, "password": PASSWORD}
+        data.update(ADULT_BIRTH)
+        data.update(fields)
+        return self.post("auth/signup", {k: v for k, v in data.items() if v is not ...})
+
+    def store(self) -> SessionBase:
+        if self.base == BROWSER:
+            return self.client.session
+        store: SessionBase = import_module(settings.SESSION_ENGINE).SessionStore(
+            session_key=self.token
+        )
+        return store
