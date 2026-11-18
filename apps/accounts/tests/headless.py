@@ -21,6 +21,8 @@ BROWSER = "/_allauth/browser/v1"
 FRONTEND_URL: str = settings.FRONTEND_URL
 PASSWORD = "made-up-Passw0rd-for-tests"
 NEW_PASSWORD = "another-made-up-Passw0rd-2"
+# The age screen's fields for a made-up adult (issue #114).
+ADULT_BIRTH = {"birth_year": 1990, "birth_month": 6}
 
 VERIFY_PREFIX = f"{FRONTEND_URL}/account/verify-email/"
 RESET_PREFIX = f"{FRONTEND_URL}/account/password/reset/key/"
@@ -36,8 +38,16 @@ def app_headers(token: str | None) -> dict[str, str]:
     return {"X-Session-Token": token} if token else {}
 
 
-def signup(client: Client, base: str, email: str, password: str = PASSWORD) -> Any:
-    return post(client, f"{base}/auth/signup", {"email": email, "password": password})
+def signup(
+    client: Client,
+    base: str,
+    email: str,
+    password: str = PASSWORD,
+    **headers: str,
+) -> Any:
+    """Sign up with a made-up adult birth year and month (issue #114)."""
+    data = {"email": email, "password": password, **ADULT_BIRTH}
+    return post(client, f"{base}/auth/signup", data, **headers)
 
 
 def login(

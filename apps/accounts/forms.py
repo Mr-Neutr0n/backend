@@ -1,9 +1,13 @@
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from django import forms
 from django.contrib.auth import forms as auth_forms
 
 from apps.accounts.models import User
+
+if TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+    from django.http import HttpRequest
 
 
 class UserCreationForm(auth_forms.AdminUserCreationForm[User]):
@@ -22,3 +26,41 @@ class UserChangeForm(auth_forms.UserChangeForm[User]):
         model = User
         fields = "__all__"
         field_classes: ClassVar[dict[str, type[forms.Field]]] = {}
+
+
+# Never the submitted value: allauth returns these messages to the client.
+_WHOLE_NUMBER = "Enter a whole number."
+_BIRTH_YEAR_MESSAGES = {
+    "required": "Enter your birth year.",
+    "invalid": _WHOLE_NUMBER,
+    "min_value": "Enter a birth year of 1900 or later.",
+}
+_BIRTH_MONTH_MESSAGES = {
+    "required": "Enter your birth month.",
+    "invalid": _WHOLE_NUMBER,
+    "min_value": "Enter a month from 1 to 12.",
+    "max_value": "Enter a month from 1 to 12.",
+}
+
+
+class SignupAgeForm(forms.Form):
+    """The age screen's fields on allauth's signup (issue #114, ADR 0017).
+
+    ``ACCOUNT_SIGNUP_FORM_CLASS`` names this form, so allauth's signup
+    input for both headless clients carries the fields and its OpenAPI
+    document lists them as required. A birth year and month only, never a
+    day (ADR 0009). OPEN's signup view (``apps/accounts/headless_views.py``)
+    checks them first and refuses anyone under 13.
+
+    allauth imports this class while it builds its own signup form, so this
+    module must never import allauth's forms.
+    """
+
+    birth_year = forms.IntegerField(min_value=1900, error_messages=_BIRTH_YEAR_MESSAGES)
+    birth_month = forms.IntegerField(
+        min_value=1, max_value=12, error_messages=_BIRTH_MONTH_MESSAGES
+    )
+
+    def signup(self, request: "HttpRequest", user: "AbstractBaseUser") -> None:
+        """allauth calls this after saving a new Account. Nothing to store:
+        the signup view holds the age in the session."""
