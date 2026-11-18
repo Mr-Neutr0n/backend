@@ -218,6 +218,7 @@ uv run pre-commit run --all-files
 - `CONTEXT.md`: the domain language (Match, Ledger, Replay, Rating Format, Reliability, and so on). Read it before naming models, endpoints, or fields.
 - `docs/adr/`: architecture decision records. Check here before changing a decision, and add a record when you make one.
 - `docs/privacy/personal-data-inventory.md`: every personal data field, with purpose, visibility, retention, and encryption (ADR 0009).
+- `docs/email.md`: the sending domain `mail.openpb.org`, its Resend setup and DNS records (SPF, DKIM, DMARC), and the DMARC rollout.
 - GitHub issue #1: the backend plan's decisions (Q1 to Q16, F1 to F11) and checked package versions.
 - Organization-wide policy lives in the `openpickleball/.github` repository: charter, governance, roadmap, contributing guide, security policy, licensing. A local checkout may exist at `../OPEN-pickleball`.
 - The reference engine may be checked out at `../OPEN-engine`. Its module docstring in `src/open_engine/engine.py` lists production requirements the backend must meet.
