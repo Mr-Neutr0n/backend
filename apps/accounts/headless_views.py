@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, ClassVar
 from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailAddress
 from allauth.account.utils import user_email
+from allauth.decorators import rate_limit
 from allauth.headless.account.inputs import (
     RequestPasswordResetInput as BaseRequestPasswordResetInput,
 )
@@ -46,6 +47,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.urls import URLPattern, path
+from django.utils.decorators import method_decorator
 
 from apps.accounts.forms import SignupAgeForm
 from apps.accounts.validators import is_canonical_email
@@ -150,6 +152,9 @@ class SignupInput(BaseSignupInput):
         return user
 
 
+# allauth's own signup limit, on OPEN's handle, so every signup POST
+# counts once, age screen answers included, and a 429 comes first.
+@method_decorator(rate_limit(action="signup"), name="handle")
 class SignupView(BaseSignupView):
     """allauth's sign-up, behind the age screen (issue #114).
 
@@ -166,7 +171,11 @@ class SignupView(BaseSignupView):
             refused = self._screen_age(request)
             if refused is not None:
                 return refused
-        response: HttpResponseBase = super().handle(request, *args, **kwargs)
+        # Past allauth's SignupView, whose handle carries the same rate
+        # limit: calling it would count this request a second time.
+        response: HttpResponseBase = super(BaseSignupView, self).handle(
+            request, *args, **kwargs
+        )
         return response
 
     def _screen_age(self, request: "HttpRequest") -> "HttpResponseBase | None":
