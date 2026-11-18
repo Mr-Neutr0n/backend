@@ -129,16 +129,26 @@ class SignupInput(BaseSignupInput):
         """allauth's save, then the age held for the new Account.
 
         A taken address creates no Account, and its age is held bound to
-        none: both paths change the session alike, so the app client's
-        answers (a session token or not) stay the same (enumeration).
+        none: both paths write the session alike, so the app client's
+        answers (a session token or not) stay the same (enumeration). One
+        exception: when the session already holds an age bound to the
+        Account whose login is this address (a repeated signup), that hold
+        is written back unchanged, so the Account keeps its age.
         """
         user, response = super().try_save(request)
-        hold_signup_birth(
-            request.session,
-            user,
-            self.cleaned_data["birth_year"],
-            self.cleaned_data["birth_month"],
-        )
+        session = request.session
+        held = session.get(SIGNUP_BIRTH_SESSION_KEY)
+        if user is None and _is_held_for_login(held, self.cleaned_data.get("email")):
+            # Written back, not skipped, so the session changes as on the
+            # other paths.
+            session[SIGNUP_BIRTH_SESSION_KEY] = held
+        else:
+            hold_signup_birth(
+                session,
+                user,
+                self.cleaned_data["birth_year"],
+                self.cleaned_data["birth_month"],
+            )
         return user, response
 
     def save(self, request: "HttpRequest") -> "AbstractBaseUser":
@@ -151,6 +161,20 @@ class SignupInput(BaseSignupInput):
                 user=user, email=user_email(user), primary=True, verified=False
             )
         return user
+
+
+def _is_held_for_login(held: object, email: object) -> bool:
+    """Whether ``held`` is bound to the Account whose login is ``email``."""
+    if not isinstance(held, dict) or held.get("account") is None:
+        return False
+    if not isinstance(email, str):
+        return False
+    manager = get_user_model()._default_manager
+    try:
+        account = manager.get_by_natural_key(email)
+    except manager.model.DoesNotExist:
+        return False
+    return bool(account.pk == held["account"])
 
 
 # allauth's own signup limit, on OPEN's handle, so every signup POST
