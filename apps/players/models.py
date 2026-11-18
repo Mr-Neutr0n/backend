@@ -1,9 +1,10 @@
 """Players and their privacy settings. See ADR 0002 and ADR 0009.
 
 Create a Player through ``apps.players.services.create_player``, which
-also creates its PlayerPrivacy row. A Player is 13 or older when its
-birth year or month is set (``apps.players.age``, issue #114). Only the player changes these fields
-and settings, through the services in that module.
+also creates its PlayerPrivacy row. When the birth year or month is set
+or changed, the player must be 13 or older (``apps.players.age``, issue
+#114). Only the player changes these fields and settings, through the
+services in that module.
 """
 
 import unicodedata

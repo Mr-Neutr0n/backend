@@ -4,6 +4,7 @@ from django import forms
 from django.contrib.auth import forms as auth_forms
 
 from apps.accounts.models import User
+from apps.players.models import EARLIEST_BIRTH_YEAR
 
 if TYPE_CHECKING:
     from django.contrib.auth.base_user import AbstractBaseUser
@@ -33,7 +34,7 @@ _WHOLE_NUMBER = "Enter a whole number."
 _BIRTH_YEAR_MESSAGES = {
     "required": "Enter your birth year.",
     "invalid": _WHOLE_NUMBER,
-    "min_value": "Enter a birth year of 1900 or later.",
+    "min_value": f"Enter a birth year of {EARLIEST_BIRTH_YEAR} or later.",
 }
 _BIRTH_MONTH_MESSAGES = {
     "required": "Enter your birth month.",
@@ -56,7 +57,9 @@ class SignupAgeForm(forms.Form):
     module must never import allauth's forms.
     """
 
-    birth_year = forms.IntegerField(min_value=1900, error_messages=_BIRTH_YEAR_MESSAGES)
+    birth_year = forms.IntegerField(
+        min_value=EARLIEST_BIRTH_YEAR, error_messages=_BIRTH_YEAR_MESSAGES
+    )
     birth_month = forms.IntegerField(
         min_value=1, max_value=12, error_messages=_BIRTH_MONTH_MESSAGES
     )
