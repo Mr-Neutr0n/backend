@@ -41,6 +41,7 @@ from allauth.headless.account.views import (
 )
 from allauth.headless.account.views import SignupView as BaseSignupView
 from allauth.headless.account.views import VerifyEmailView as BaseVerifyEmailView
+from allauth.headless.base.response import ConflictResponse, ForbiddenResponse
 from allauth.headless.constants import Client
 from allauth.headless.internal.restkit.response import ErrorResponse
 from django.conf import settings
@@ -158,8 +159,12 @@ class SignupInput(BaseSignupInput):
 class SignupView(BaseSignupView):
     """allauth's sign-up, behind the age screen (issue #114).
 
-    The age is checked in ``handle``, before allauth's input (and so its
-    email lookup) runs.
+    Order: allauth's rate limit, then its signed-in (409) and closed
+    signup (403) answers, made as allauth makes them, then the age screen,
+    then allauth's input (and so its email lookup). allauth itself answers
+    invalid input before its 409 and 403; here a malformed age comes after
+    them too, so the screen only ever answers, or flags, a session that
+    allauth would let sign up.
     """
 
     input_class: ClassVar[dict[str, type[SignupInput]]] = {"POST": SignupInput}
@@ -168,9 +173,15 @@ class SignupView(BaseSignupView):
         self, request: "HttpRequest", *args: object, **kwargs: object
     ) -> "HttpResponseBase":
         if request.method == "POST":
-            refused = self._screen_age(request)
-            if refused is not None:
-                return refused
+            early: HttpResponseBase | None = None
+            if request.user.is_authenticated:
+                early = ConflictResponse(request)
+            elif not get_adapter().is_open_for_signup(request):
+                early = ForbiddenResponse(request)
+            else:
+                early = self._screen_age(request)
+            if early is not None:
+                return early
         # Past allauth's SignupView, whose handle carries the same rate
         # limit: calling it would count this request a second time.
         response: HttpResponseBase = super(BaseSignupView, self).handle(
